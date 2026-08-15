@@ -1,0 +1,44 @@
+{
+  "id": "com.github.pewmoe.cosmic-ascii-battery",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "command": "cosmic-ascii-battery",
+  "finish-args": [
+    "--socket=wayland",
+    "--device=dri",
+    "--system-talk-name=net.hadess.PowerProfiles",
+    "--system-talk-name=org.freedesktop.UPower",
+    "--system-talk-name=org.freedesktop.login1",
+    "--filesystem=/sys/class/backlight:ro"
+  ],
+ "build-options": {
+  "append-path": "/usr/lib/sdk/rust-stable/bin",
+  "env": {
+    "CARGO_BUILD_JOBS": "2",
+    "LOCKSTEP_XML_PATH": "/run/build/cosmic-ascii-battery/vendor/atspi-common/xml"
+  }
+},
+
+  "modules": [
+    {
+      "name": "cosmic-ascii-battery",
+      "buildsystem": "simple",
+      "build-commands": [
+        "rustc --version",
+        "cargo --version",
+        "tar pxf vendor.tar",
+        "cargo build --release --frozen --offline",
+        "install -Dm0755 target/release/cosmic-ascii-battery /app/bin/cosmic-ascii-battery",
+        "install -Dm0644 target/xdgen/app.desktop /app/share/applications/com.github.pewmoe.cosmic-ascii-battery.desktop",
+        "install -Dm0644 target/xdgen/app.metainfo.xml /app/share/metainfo/com.github.pewmoe.cosmic-ascii-battery.metainfo.xml",
+        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.pewmoe.cosmic-ascii-battery.svg"
+      ],
+      "sources": [
+        { "type": "dir", "path": "./" },
+        { "type": "file", "path": "vendor.tar" }
+      ]
+    }
+  ]
+}

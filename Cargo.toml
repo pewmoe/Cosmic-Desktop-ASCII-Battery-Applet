@@ -1,0 +1,38 @@
+[package]
+name = "cosmic-ascii-battery"
+version = "1.0.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Battery style applet for cosmic desktop"
+repository = "https://github.com/pop-os/cosmic-app-template"
+
+[build-dependencies]
+xdgen = "0.1"
+
+[dependencies]
+i18n-embed-fl = "0.10"
+rust-embed = "8.11"
+tokio = { version = "1.52.0", features = ["full"] }
+zbus = { version = "5", features = ["blocking-api"] }
+starship-battery = "0.8"
+
+[dependencies.i18n-embed]
+version = "0.16"
+features = ["fluent-system", "desktop-requester"]
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+# See https://github.com/pop-os/libcosmic/blob/master/Cargo.toml for available features.
+features = [
+    "applet",
+    "applet-token",
+    "dbus-config",
+    "multi-window",
+]
+
+
+# Uncomment to test a locally-cloned libcosmic
+# [patch.'https://github.com/pop-os/libcosmic']
+# libcosmic = { path = "../libcosmic" }
+# cosmic-config = { path = "../libcosmic/cosmic-config" }
+# cosmic-theme = { path = "../libcosmic/cosmic-theme" }

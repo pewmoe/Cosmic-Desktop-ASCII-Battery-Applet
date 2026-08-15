@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+<id>com.github.pewmoe.cosmic-ascii-battery</id>
+<metadata_license>CC0-1.0</metadata_license>
+<project_license>MPL-2.0</project_license>
+<name>Cosmic Ascii Battery</name>
+<summary>Battery style applet for cosmic desktop</summary>
+<description>
+<p>
+  Shows battery percentage and charge level as a compact block-character bar
+  directly in the COSMIC panel. Click it to open a popup for switching power
+  profiles, adjusting screen brightness with an ASCII slider, and choosing
+  an accent color.
+</p>
+</description>
+<icon type="remote" width="64" height="64" scale="1">
+    https://github.com/pop-os/cosmic-app-template/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
+</icon>
+<url type="vcs-browser">https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet</url>
+<url type="homepage">https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet</url>
+<launchable type="desktop-id">com.github.pewmoe.cosmic-ascii-battery.desktop</launchable>
+<developer id="io.github.pewmoe">
+<name>pewmoe</name>
+</developer>
+<provides>
+<id>com.system76.CosmicApplet</id>
+<binary>cosmic-ascii-battery</binary>
+</provides>
+<requires>
+<display_length compare="ge">360</display_length>
+</requires>
+<supports>
+<control>keyboard</control>
+<control>pointing</control>
+<control>touch</control>
+</supports>
+<categories>
+<category>COSMIC</category>
+</categories>
+<keywords>
+<keyword>COSMIC</keyword>
+</keywords>
+<releases>
+<release version="1.0.0" date="2026-08-15">
+<description>
+<p>ASCII battery applet for Cosmic (Initial release).</p>
+</description>
+</release>
+</releases>
+<content_rating type="oars-1.1" />
+</component>

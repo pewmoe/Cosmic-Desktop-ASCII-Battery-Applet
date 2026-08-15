@@ -1,0 +1,14 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=Cosmic Ascii Battery
+Comment=Battery status, power profiles, and time remaining for COSMIC
+Type=Application
+Icon=com.github.pewmoe.cosmic-ascii-battery
+Exec=cosmic-ascii-battery
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC;Battery;Power;Laptop;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto

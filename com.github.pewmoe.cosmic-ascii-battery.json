@@ -35,10 +35,14 @@
         "install -Dm0644 target/xdgen/app.metainfo.xml /app/share/metainfo/com.github.pewmoe.cosmic-ascii-battery.metainfo.xml",
         "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.pewmoe.cosmic-ascii-battery.svg"
       ],
-      "sources": [
-        { "type": "dir", "path": "./" },
-        { "type": "file", "path": "vendor.tar" }
-      ]
+    "sources": [
+  { "type": "git", "url": "https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet", "tag": "1.0.0" },
+  {
+    "type": "file",
+    "url": "https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet/releases/download/1.0.0/vendor.tar",
+    "sha256": "<hash>"
+  }
+]
     }
   ]
 }

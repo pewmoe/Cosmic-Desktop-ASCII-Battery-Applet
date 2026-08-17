@@ -40,12 +40,11 @@ just build-release
 sudo just install
 ```
 
-Restart the panel (`killall cosmic-panel`) and add the applet from Settings as above.
+Restart the panel (`killall cosmic-panel`) (or what ever your kill command is) and add the applet from Settings as above.
 
 ## Known issues
 
-- **Screen brightness control does not currently work when running as a Flatpak.** Reading/writing brightness relies on system paths and D-Bus calls that need further sandbox permission work. Power profile switching and everything else works correctly in the Flatpak build. Investigating.
-
+- **Screen brightness control does not currently work when running as a Flatpak.** Reading/writing brightness relies on system paths and D-Bus calls that need further sandbox permission work. Power profile switching and everything else works correctly in the Flatpak build. im still trying to figure out a way to fix it
 ## Development
 
 ```bash
@@ -57,6 +56,10 @@ just check           # clippy
 ## License
 
 [MPL-2.0](LICENSE)
+
+## possible future features
+-**ASCII sound and brightness bar show on panel toggle.**
+-**custom color picker.** 
 
 ## Acknowledgments
 

@@ -1,43 +1,63 @@
 # Cosmic Ascii Battery
 
-ttery style applet for cosmic desktop
+A compact battery indicator applet for the [COSMIC](https://system76.com/cosmic) desktop panel — shown as an ASCII block bar instead of a traditional icon.
+
+```
+87% ⚡[██████░░]
+```
+
+## Features
+
+- **Battery percentage and charge status** as a live-updating block bar directly in the panel, alongside a charging indicator
+- **Automatically resizes** with your configured panel size — no fixed/cramped layout
+- **Click to open a popup** showing:
+  - Estimated time to full charge / time remaining
+  - **Power profile switching** (Power Saver / Balanced / Performance)
+  - **ASCII brightness slider** — click any segment to set screen brightness
+  - **Accent color picker** — choose a fixed color, or leave it on Auto to color-code by charge level (red/orange/yellow/blue)
 
 ## Installation
 
-A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
+### Via COSMIC Flatpak repo (recommended)
 
-- `just` builds the application with the default `just build-release` recipe
-- `just run` builds and runs the application
-- `just install` installs the project into the system
-- `just vendor` creates a vendored tarball
-- `just build-vendored` compiles with vendored dependencies from that tarball
-- `just check` runs clippy on the project to check for linter warnings
-- `just check-json` can be used by IDEs that support LSP
+This applet is submitted to [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) and pending review. Once merged:
 
-## Translators
-
-[Fluent][fluent] is used for localization of the software. Fluent's translation files are found in the [i18n directory](./i18n). New translations may copy the [English (en) localization](./i18n/en) of the project, rename `en` to the desired [ISO 639-1 language code][iso-codes], and then translations can be provided for each [message identifier][fluent-guide]. If no translation is necessary, the message may be omitted.
-
-## Packaging
-
-If packaging for a Linux distribution, vendor dependencies locally with the `vendor` rule, and build with the vendored sources using the `build-vendored` rule. When installing files, use the `rootdir` and `prefix` variables to change installation paths.
-
-```sh
-just vendor
-just build-vendored
-just rootdir=debian/cosmic-ascii-battery prefix=/usr install
+```bash
+flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
+flatpak install --user cosmic com.github.pewmoe.cosmic-ascii-battery
 ```
 
-It is recommended to build a source tarball with the vendored dependencies, which can typically be done by running `just vendor` on the host system before it enters the build environment.
+Then add it to your panel via **Settings → Desktop → Panel (or Dock) → Add applet**.
 
-## Developers
+### Building from source
 
-Developers should install [rustup][rustup] and configure their editor to use [rust-analyzer][rust-analyzer].
+Requires [`just`](https://github.com/casey/just), a Rust toolchain, and the COSMIC development libraries.
 
-[fluent]: https://projectfluent.org/
-[fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
-[iso-codes]: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
-[just]: https://github.com/casey/just
-[rustup]: https://rustup.rs/
-[rust-analyzer]: https://rust-analyzer.github.io/
-[sccache]: https://github.com/mozilla/sccache
+```bash
+git clone https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet.git
+cd Cosmic-Desktop-ASCII-Battery-Applet
+just build-release
+sudo just install
+```
+
+Restart the panel (`killall cosmic-panel`) and add the applet from Settings as above.
+
+## Known issues
+
+- **Screen brightness control does not currently work when running as a Flatpak.** Reading/writing brightness relies on system paths and D-Bus calls that need further sandbox permission work. Power profile switching and everything else works correctly in the Flatpak build. Investigating.
+
+## Development
+
+```bash
+just build-debug     # debug build
+just run             # run locally for testing
+just check           # clippy
+```
+
+## License
+
+[MPL-2.0](LICENSE)
+
+## Acknowledgments
+
+Built with [libcosmic](https://github.com/pop-os/libcosmic) and scaffolded from [cosmic-app-template](https://github.com/pop-os/cosmic-app-template).

@@ -25,6 +25,7 @@ This applet is submitted to [pop-os/cosmic-flatpak](https://github.com/pop-os/co
 ```bash
 flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
 flatpak install --user cosmic com.github.pewmoe.cosmic-ext-ascii-dot-battery
+
 ```
 
 Then add it to your panel via **Settings → Desktop → Panel (or Dock) → Add applet**.

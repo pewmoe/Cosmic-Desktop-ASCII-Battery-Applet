@@ -3,8 +3,8 @@
 Name=Cosmic Ascii Battery
 Comment=Battery status, power profiles, and time remaining for COSMIC
 Type=Application
-Icon=com.github.pewmoe.cosmic-ascii-battery
-Exec=cosmic-ascii-battery
+Icon=com.github.pewmoe.cosmic-ext-ASCII-dot-battery
+Exec=cosmic-ext-ascii-dot-battery
 Terminal=false
 StartupNotify=true
 Categories=COSMIC

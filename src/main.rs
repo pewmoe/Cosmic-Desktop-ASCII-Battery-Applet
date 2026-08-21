@@ -35,7 +35,7 @@ impl Application for BatteryApplet {
     type Flags = ();
     type Message = Message;
 
-    const APP_ID: &'static str = "com.github.pewmoe.cosmic-ascii-battery";
+    const APP_ID: &'static str = "com.github.pewmoe.cosmic-ext-ASCII-dot-battery";
 
     fn core(&self) -> &Core {
         &self.core

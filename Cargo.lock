@@ -884,20 +884,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-ascii-battery"
-version = "1.0.0"
-dependencies = [
- "i18n-embed",
- "i18n-embed-fl",
- "libcosmic",
- "rust-embed",
- "starship-battery",
- "tokio",
- "xdgen",
- "zbus",
-]
-
-[[package]]
 name = "cosmic-client-toolkit"
 version = "0.2.0"
 source = "git+https://github.com/pop-os/cosmic-protocols?rev=32283d7#32283d76a8d0342da74c4cc022a533c52dcf378f"
@@ -938,6 +924,20 @@ source = "git+https://github.com/pop-os/libcosmic.git#1f8d8786940cc6db59d412153c
 dependencies = [
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "cosmic-ext-ascii-dot-battery"
+version = "1.0.0"
+dependencies = [
+ "i18n-embed",
+ "i18n-embed-fl",
+ "libcosmic",
+ "rust-embed",
+ "starship-battery",
+ "tokio",
+ "xdgen",
+ "zbus",
 ]
 
 [[package]]

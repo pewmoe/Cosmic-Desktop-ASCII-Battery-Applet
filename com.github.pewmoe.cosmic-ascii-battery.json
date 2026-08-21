@@ -1,10 +1,10 @@
 {
-  "id": "com.github.pewmoe.cosmic-ascii-battery",
+  "id": "com.github.pewmoe.cosmic-ext-ASCII-dot-battery",
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "25.08",
   "sdk": "org.freedesktop.Sdk",
   "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
-  "command": "cosmic-ascii-battery",
+  "command": "cosmic-ext-ascii-dot-battery",
   "finish-args": [
     "--socket=wayland",
     "--device=dri",
@@ -17,23 +17,23 @@
   "append-path": "/usr/lib/sdk/rust-stable/bin",
   "env": {
     "CARGO_BUILD_JOBS": "2",
-    "LOCKSTEP_XML_PATH": "/run/build/cosmic-ascii-battery/vendor/atspi-common/xml"
+    "LOCKSTEP_XML_PATH": "/run/build/cosmic-ext-ascii-dot-battery/vendor/atspi-common/xml"
   }
 },
 
   "modules": [
     {
-      "name": "cosmic-ascii-battery",
+      "name": "cosmic-ext-ascii-dot-battery",
       "buildsystem": "simple",
       "build-commands": [
         "rustc --version",
         "cargo --version",
         "tar pxf vendor.tar",
         "cargo build --release --frozen --offline",
-        "install -Dm0755 target/release/cosmic-ascii-battery /app/bin/cosmic-ascii-battery",
-        "install -Dm0644 target/xdgen/app.desktop /app/share/applications/com.github.pewmoe.cosmic-ascii-battery.desktop",
-        "install -Dm0644 target/xdgen/app.metainfo.xml /app/share/metainfo/com.github.pewmoe.cosmic-ascii-battery.metainfo.xml",
-        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.pewmoe.cosmic-ascii-battery.svg"
+        "install -Dm0755 target/release/cosmic-ext-ascii-dot-battery /app/bin/cosmic-ext-ascii-dot-battery",
+        "install -Dm0644 target/xdgen/app.desktop /app/share/applications/com.github.pewmoe.cosmic-ext-ASCII-dot-battery.desktop",
+        "install -Dm0644 target/xdgen/app.metainfo.xml /app/share/metainfo/com.github.pewmoe.cosmic-ext-ASCII-dot-battery.metainfo.xml",
+        "install -Dm0644 resources/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.pewmoe.cosmic-ext-ASCII-dot-battery.svg"
       ],
     "sources": [
   { "type": "git", "url": "https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet", "tag": "1.0.0" },

@@ -1,5 +1,5 @@
-name := 'cosmic-ascii-battery'
-appid := 'com.github.pewmoe.cosmic-ascii-battery'
+name := 'cosmic-ext-ascii-dot-battery'
+appid := 'com.github.pewmoe.cosmic-ext-ASCII-dot-battery'
 
 rootdir := ''
 prefix := '/usr'

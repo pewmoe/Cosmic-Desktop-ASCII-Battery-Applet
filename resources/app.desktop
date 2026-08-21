@@ -1,6 +1,6 @@
 #!/usr/bin/env xdg-open
 [Desktop Entry]
-Name=Cosmic Ascii Battery
+Name=Ascii Battery for the COSMIC™ desktop
 Comment=Battery status, power profiles, and time remaining for COSMIC
 Type=Application
 Icon=com.github.pewmoe.cosmic-ext-ASCII-dot-battery

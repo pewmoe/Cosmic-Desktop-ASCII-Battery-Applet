@@ -18,6 +18,7 @@ pub struct BatteryApplet {
     active_profile: String,
     brightness_percent: u32,
     accent_color: Option<Color>,
+    is_dragging_brightness: bool,
     popup: Option<window::Id>,
 }
 
@@ -26,7 +27,9 @@ pub enum Message {
     Tick,
     ToggleMenu,
     SetProfile(String),
-    SetBrightness(u32),
+    BrightnessPress(u32),
+    BrightnessDragOver(u32),
+    BrightnessDragEnd,
     SetAccentColor(Option<Color>),
 }
 
@@ -54,8 +57,10 @@ impl Application for BatteryApplet {
             active_profile: String::from("balanced"),
             brightness_percent: 100,
             accent_color: None,
+            is_dragging_brightness: false,
             popup: None,
         };
+        
 
         applet.update_battery();
         applet.update_profile();
@@ -116,10 +121,27 @@ impl Application for BatteryApplet {
             }
         }
 
-        Message::SetBrightness(pct) => {
+          Message::BrightnessPress(pct) => {
             let pct = pct.min(100);
-            set_brightness_percent(pct).ok();
+            self.is_dragging_brightness = true;
+            if let Err(e) = set_brightness_percent(pct) {
+                eprintln!("set_brightness_percent failed: {e}");
+            }
             self.brightness_percent = pct;
+        }
+
+        Message::BrightnessDragOver(pct) => {
+            if self.is_dragging_brightness {
+                let pct = pct.min(100);
+                if let Err(e) = set_brightness_percent(pct) {
+                    eprintln!("set_brightness_percent failed: {e}");
+                }
+                self.brightness_percent = pct;
+            }
+        }
+
+        Message::BrightnessDragEnd => {
+            self.is_dragging_brightness = false;
         }
 
         Message::SetAccentColor(color) => {
@@ -219,14 +241,16 @@ self.core.applet.autosize_window(content).into()
             * brightness_segments as f32)
             .round() as usize;
 
-        let mut slider_row = row![].spacing(2);
-        for i in 1..=brightness_segments {
-            let glyph = if i <= filled_segments { "█" } else { "░" };
-            let target_pct = (i * 100 / brightness_segments) as u32;
-            let segment =
-                mouse_area(text(glyph).size(16)).on_press(Message::SetBrightness(target_pct));
-            slider_row = slider_row.push(segment);
-        }
+      let mut slider_row = row![].spacing(2);
+for i in 1..=brightness_segments {
+    let glyph = if i <= filled_segments { "█" } else { "░" };
+    let target_pct = (i * 100 / brightness_segments) as u32;
+    let segment = mouse_area(text(glyph).size(16))
+        .on_press(Message::BrightnessPress(target_pct))
+        .on_enter(Message::BrightnessDragOver(target_pct))
+        .on_release(Message::BrightnessDragEnd);
+    slider_row = slider_row.push(segment);
+}
 
         let brightness_label =
             text(format!("Brightness: {}%", self.brightness_percent)).size(12);
@@ -306,9 +330,10 @@ impl BatteryApplet {
         }
     }
 
-    fn update_brightness(&mut self) {
-        if let Some(pct) = get_brightness_percent() {
-            self.brightness_percent = pct;
+      fn update_brightness(&mut self) {
+        match get_brightness_percent() {
+            Some(pct) => self.brightness_percent = pct,
+            None => eprintln!("get_brightness_percent returned None"),
         }
     }
 }

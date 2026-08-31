@@ -11,10 +11,12 @@ A compact battery indicator applet for the [COSMIC](https://system76.com/cosmic)
 - **Battery percentage and charge status** as a live-updating block bar directly in the panel, alongside a charging indicator
 - **Automatically resizes** with your configured panel size — no fixed/cramped layout
 - **Click to open a popup** showing:
-  - Estimated time to full charge / time remaining
+  - Estimated time to full charge / time remaining / brightness slider
   - **Power profile switching** (Power Saver / Balanced / Performance)
   - **ASCII brightness slider** — click any segment to set screen brightness
   - **Accent color picker** — choose a fixed color, or leave it on Auto to color-code by charge level (red/orange/yellow/blue)
+  - **brightness toggle** - toggle ASCII brightness bar on/off from the customization tab
+  - **CUSTOMIZATION** add/remove ASCII bars (no volume yet cause flatpak is annoying)
 
 ## Installation
 
@@ -45,7 +47,8 @@ Restart the panel (`killall cosmic-panel`) (or what ever your kill command is) a
 
 ## Known issues
 
-- **Screen brightness control does not currently work when running as a Flatpak.** Reading/writing brightness relies on system paths and D-Bus calls that need further sandbox permission work. Power profile switching and everything else works correctly in the Flatpak build. im still trying to figure out a way to fix it
+- **the notification applet disappearing is a problem from the notification applet not my applet, just reboot or logout and it will be fixed.**
+- **the frosted glass effect doesn't work yet cause i cant be bothered to troubleshoot it please dont ask for it**
 ## Development
 
 ```bash

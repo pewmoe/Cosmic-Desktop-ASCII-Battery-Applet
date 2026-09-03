@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Ascii Battery for the COSMIC™ desktop
+Name[en]=Cosmic Ascii Battery
+Comment=Battery status, power profiles, and time remaining for COSMIC
+Comment[en]=ttery style applet for cosmic desktop
+Type=Application
+Icon=com.github.pewmoe.cosmic-ext-ASCII-dot-battery
+Exec=cosmic-ext-ascii-dot-battery
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC;Battery;Power;Laptop;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto

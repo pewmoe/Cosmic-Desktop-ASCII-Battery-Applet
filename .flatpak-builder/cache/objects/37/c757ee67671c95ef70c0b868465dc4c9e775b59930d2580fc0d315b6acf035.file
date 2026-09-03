@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.pewmoe.cosmic-ext-ASCII-dot-battery</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MPL-2.0</project_license>
+  <name>Power ASCII Deck</name>
+  <name xml:lang="en">Cosmic Ascii Battery</name>
+  <summary>Ascii Battery style applet for cosmic desktop</summary>
+  <summary xml:lang="en">ttery style applet for cosmic desktop</summary>
+  <description>
+    <p>
+      Shows battery percentage and charge level as a compact block-character bar
+      directly in the COSMIC panel. Click it to open a popup for switching power
+      profiles, adjusting screen brightness with an ASCII slider, and choosing
+      an accent color.
+    </p>
+  </description>
+  <icon height="64" scale="1" width="64" type="remote">
+    https://github.com/pop-os/cosmic-app-template/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
+  </icon>
+  <url type="vcs-browser">https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet</url>
+  <url type="homepage">https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet</url>
+  <launchable type="desktop-id">com.github.pewmoe.cosmic-ext-ASCII-dot-battery.desktop</launchable>
+  <developer id="io.github.pewmoe">
+    <name>Mohammed</name>
+  </developer>
+  <provides>
+    <id>com.system76.CosmicApplet</id>
+    <binary>cosmic-ext-ascii-dot-battery</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>COSMIC</category>
+  </categories>
+  <keywords>
+    <keyword>COSMIC</keyword>
+  </keywords>
+  <releases>
+    <release date="2026-08-29" version="1.2.0">
+      <description>
+        <p>Added interactive ASCII brightness/volume controls, panel order customization, scaling options, and manual accent color overrides.</p>
+      </description>
+    </release>
+    <release date="2026-08-15" version="1.0.0">
+      <description>
+        <p>ASCII battery applet for Cosmic (Initial release).</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

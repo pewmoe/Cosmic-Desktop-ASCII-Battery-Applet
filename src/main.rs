@@ -1,19 +1,27 @@
 use cosmic::app::{Core, Task};
 use cosmic::iced::time;
 use cosmic::iced::window;
-use cosmic::iced::{Color, Alignment};
+use cosmic::iced::{Alignment, Color};
 use cosmic::iced::Subscription;
-use cosmic::widget::{button, column, container, mouse_area, row, text};
+use cosmic::widget::{button, column, container, mouse_area, row, text, Space};
+use cosmic::widget::{segmented_button, segmented_control};
 use cosmic::{Application, Element};
+use cosmic_config::{ConfigGet, ConfigSet};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 
+const ROWS: u32 = 5;
+const PCT_PER_ROW: u32 = 100 / ROWS;
+const BOLT_ROW_INDEX: u32 = ROWS / 2;
+const APP_VERSION: &str = "1.2.0";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupTab {
     Main,
     Settings,
+    About,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,17 +37,77 @@ pub enum PanelModule {
     Brightness,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowState {
+    M1,
+    M2,
+    M3,
+}
+
+impl RowState {
+    fn symbol(&self) -> char {
+        match self {
+            RowState::M1 => '░',
+            RowState::M2 => '▒',
+            RowState::M3 => '█',
+        }
+    }
+}
+
+fn row_state(percent: u32, row_index_from_bottom: u32) -> RowState {
+    let low = row_index_from_bottom * PCT_PER_ROW;
+
+    if percent >= low + PCT_PER_ROW {
+        RowState::M3
+    } else if percent >= low + PCT_PER_ROW / 2 {
+        RowState::M2
+    } else {
+        RowState::M1
+    }
+}
+
+ //nice
+pub fn render_vertical_battery(percent: u32, charging: bool) -> String {
+    let percent = percent.min(100);
+    let mut out = String::with_capacity(128);
+
+    out.push_str(" ▄▄▄ \n┌───┐\n");
+
+    for i in (0..ROWS).rev() {
+        let state = row_state(percent, i);
+        let ch = state.symbol();
+
+        out.push('│');
+
+        if i == BOLT_ROW_INDEX && charging {
+            out.push(ch);
+            out.push('⚡');
+            out.push(ch);
+        } else {
+            out.push(ch);
+            out.push(ch);
+            out.push(ch);
+        }
+
+        out.push_str("│\n");
+    }
+
+    out.push_str("└───┘");
+    out
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)] // Ensures older saved configs won't crash when missing new fields
+#[serde(default)]
 pub struct AppletConfig {
     pub show_panel_battery: bool,
     pub show_panel_brightness: bool,
     pub panel_order: Vec<PanelModule>,
     pub show_dot_grid: bool,
+    pub show_ascii_battery: bool,
     pub dot_size: DotSize,
     pub accent_color_rgba: Option<[f32; 4]>,
-    
-    // Custom Dimensions
+    pub use_monospace_font: bool,
+    pub use_system_accent: bool,
     pub panel_font_size: u16,
     pub panel_block_count: usize,
     pub panel_spacing: u16,
@@ -50,10 +118,16 @@ impl Default for AppletConfig {
         Self {
             show_panel_battery: true,
             show_panel_brightness: false,
-            panel_order: vec![PanelModule::Battery, PanelModule::Brightness],
+            panel_order: vec![
+                PanelModule::Battery,
+                PanelModule::Brightness,
+            ],
             show_dot_grid: true,
+            show_ascii_battery: true,
             dot_size: DotSize::Standard,
             accent_color_rgba: None,
+            use_monospace_font: true,
+            use_system_accent: true,
             panel_font_size: 13,
             panel_block_count: 10,
             panel_spacing: 8,
@@ -66,16 +140,25 @@ pub struct BatteryState {
     pub percentage: u32,
     pub is_charging: bool,
     pub time_remaining: Option<f32>,
+    pub current_wh: Option<f32>,
+    pub design_wh: Option<f32>,
+    pub health_percent: Option<f32>,
 }
 
 pub struct BatteryApplet {
     core: Core,
     active_tab: PopupTab,
     config: AppletConfig,
+    profile_model: segmented_button::SingleSelectModel,
+    dark_mode: bool,
 
     battery_percentage: u32,
     is_charging: bool,
     time_remaining: Option<f32>,
+    current_wh: Option<f32>,
+    design_wh: Option<f32>,
+    health_percent: Option<f32>,
+
     active_profile: String,
     brightness_percent: u32,
 
@@ -89,10 +172,12 @@ pub enum Message {
     BatteryFetched(Option<BatteryState>),
     ProfileFetched(Option<String>),
     BrightnessFetched(Option<u32>),
+    DarkModeFetched(Option<bool>),
 
     ToggleMenu,
     SwitchTab(PopupTab),
     SetProfile(String),
+    ProfileSelected(segmented_button::Entity),
 
     BrightnessPress(u32),
     BrightnessDragOver(u32),
@@ -103,10 +188,17 @@ pub enum Message {
     TogglePanelBrightness(bool),
     MoveModuleLeft(usize),
     MoveModuleRight(usize),
+
     ToggleDotGrid(bool),
+    ToggleAsciiBattery(bool),
+
     SetDotSize(DotSize),
 
-    // Dimension Adjustments
+    ToggleDarkMode(bool),
+
+    ToggleUseMonospace(bool),
+    ToggleUseSystemAccent(bool),
+
     AdjustFontSize(i16),
     AdjustBlockCount(i16),
     AdjustSpacing(i16),
@@ -124,17 +216,36 @@ impl Default for DotSize {
     }
 }
 
+fn build_profile_model() -> segmented_button::SingleSelectModel {
+    segmented_button::Model::builder()
+        .insert(|b| b.text("Battery").data("power-saver"))
+        .insert(|b| b.text("Balanced").data("balanced"))
+        .insert(|b| b.text("Performance").data("performance"))
+        .build()
+}
+
 impl Default for BatteryApplet {
     fn default() -> Self {
         Self {
             core: Core::default(),
             active_tab: PopupTab::Main,
             config: load_config(),
+            profile_model: build_profile_model(),
+
+            // Starts as false, then gets replaced by the actual COSMIC
+            // theme state through fetch_all_states().
+            dark_mode: false,
+
             battery_percentage: 100,
             is_charging: false,
             time_remaining: None,
+            current_wh: None,
+            design_wh: None,
+            health_percent: None,
+
             active_profile: String::from("balanced"),
             brightness_percent: 100,
+
             popup: None,
             is_dragging_brightness: false,
         }
@@ -146,7 +257,8 @@ impl Application for BatteryApplet {
     type Flags = ();
     type Message = Message;
 
-    const APP_ID: &'static str = "com.github.pewmoe.cosmic-ext-ASCII-deck";
+    const APP_ID: &'static str =
+        "com.github.pewmoe.cosmic-ext-ASCII-deck";
 
     fn core(&self) -> &Core {
         &self.core
@@ -156,500 +268,1974 @@ impl Application for BatteryApplet {
         &mut self.core
     }
 
-    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let applet = BatteryApplet { core, ..Default::default() };
+    fn init(
+        core: Core,
+        _flags: Self::Flags,
+    ) -> (Self, Task<Self::Message>) {
+        let applet = BatteryApplet {
+            core,
+            ..Default::default()
+        };
+
         (applet, fetch_all_states())
     }
 
-    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+    fn update(
+        &mut self,
+        message: Self::Message,
+    ) -> Task<Self::Message> {
         let mut save_needed = false;
 
         match message {
-            Message::Tick => return fetch_all_states(),
+            Message::Tick => {
+                return fetch_all_states();
+            }
+
             Message::BatteryFetched(Some(state)) => {
                 self.battery_percentage = state.percentage;
                 self.is_charging = state.is_charging;
                 self.time_remaining = state.time_remaining;
+                self.current_wh = state.current_wh;
+                self.design_wh = state.design_wh;
+                self.health_percent = state.health_percent;
             }
+
             Message::BatteryFetched(None) => {}
-            Message::ProfileFetched(Some(profile)) => self.active_profile = profile,
-            Message::ProfileFetched(None) => {}
-            Message::BrightnessFetched(Some(pct)) => {
-                if !self.is_dragging_brightness { self.brightness_percent = pct; }
+
+            Message::ProfileFetched(Some(profile)) => {
+                self.active_profile = profile;
             }
+
+            Message::ProfileFetched(None) => {}
+
+            Message::BrightnessFetched(Some(pct)) => {
+                if !self.is_dragging_brightness {
+                    self.brightness_percent = pct;
+                }
+            }
+
             Message::BrightnessFetched(None) => {}
+
+            Message::DarkModeFetched(Some(is_dark)) => {
+                self.dark_mode = is_dark;
+            }
+
+            Message::DarkModeFetched(None) => {}
 
             Message::ToggleMenu => {
                 if let Some(popup_id) = self.popup.take() {
-                    return cosmic::iced::platform_specific::shell::commands::popup::destroy_popup::<Message>(popup_id)
+                    return cosmic::iced::platform_specific::shell::commands::popup::
+                        destroy_popup::<Message>(popup_id)
                         .map(cosmic::Action::from);
                 }
+
+                let Some(main_id) = self.core.main_window_id() else {
+                    return Task::none();
+                };
 
                 let new_id = window::Id::unique();
                 self.popup = Some(new_id);
 
                 let popup_settings = self.core.applet.get_popup_settings(
-                    self.core.main_window_id().unwrap(),
+                    main_id,
                     new_id,
-                    Some((420, 480)), // Made popup slightly taller to fit new settings
-                    None, None,
+                    None,
+                    None,
+                    None,
                 );
 
-                return cosmic::iced::platform_specific::shell::commands::popup::get_popup::<Message>(popup_settings)
+                return cosmic::iced::platform_specific::shell::commands::popup::
+                    get_popup::<Message>(popup_settings)
                     .map(cosmic::Action::from);
             }
 
-            Message::SwitchTab(tab) => self.active_tab = tab,
+            Message::SwitchTab(tab) => {
+                self.active_tab = tab;
+            }
 
             Message::SetProfile(profile) => {
                 self.active_profile = profile.clone();
+
                 return Task::perform(
-                    async move { tokio::task::spawn_blocking(move || set_active_profile(&profile)).await.ok(); },
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_active_profile(&profile)
+                        )
+                        .await
+                        .ok();
+                    },
                     |_| cosmic::Action::App(Message::Tick),
                 );
             }
 
-            Message::BrightnessPress(pct) => {
-                let pct = pct.min(100);
-                self.is_dragging_brightness = true;
-                self.brightness_percent = pct;
-                return Task::perform(
-                    async move { tokio::task::spawn_blocking(move || set_brightness_percent(pct)).await.ok(); },
-                    move |_| cosmic::Action::App(Message::BrightnessFetched(Some(pct))),
-                );
-            }
-            Message::BrightnessDragOver(pct) => {
-                if self.is_dragging_brightness {
-                    let pct = pct.min(100);
-                    self.brightness_percent = pct;
+            Message::ProfileSelected(entity) => {
+                self.profile_model.activate(entity);
+
+                if let Some(profile_value) =
+                    self.profile_model.data::<&str>(entity)
+                {
+                    let profile = profile_value.to_string();
+                    self.active_profile = profile.clone();
+
                     return Task::perform(
-                        async move { tokio::task::spawn_blocking(move || set_brightness_percent(pct)).await.ok(); },
-                        move |_| cosmic::Action::App(Message::BrightnessFetched(Some(pct))),
+                        async move {
+                            tokio::task::spawn_blocking(
+                                move || set_active_profile(&profile)
+                            )
+                            .await
+                            .ok();
+                        },
+                        |_| cosmic::Action::App(Message::Tick),
                     );
                 }
             }
-            Message::BrightnessDragEnd => self.is_dragging_brightness = false,
+
+            Message::BrightnessPress(pct) => {
+                let pct = pct.min(100);
+
+                self.is_dragging_brightness = true;
+                self.brightness_percent = pct;
+
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_brightness_percent(pct)
+                        )
+                        .await
+                        .ok();
+                    },
+                    move |_| {
+                        cosmic::Action::App(
+                            Message::BrightnessFetched(Some(pct))
+                        )
+                    },
+                );
+            }
+
+            Message::BrightnessDragOver(pct) => {
+                if self.is_dragging_brightness {
+                    self.brightness_percent = pct.min(100);
+                }
+            }
+
+            Message::BrightnessDragEnd => {
+                self.is_dragging_brightness = false;
+
+                let pct = self.brightness_percent;
+
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_brightness_percent(pct)
+                        )
+                        .await
+                        .ok();
+                    },
+                    move |_| {
+                        cosmic::Action::App(
+                            Message::BrightnessFetched(Some(pct))
+                        )
+                    },
+                );
+            }
 
             Message::SetAccentColor(color) => {
-                self.config.accent_color_rgba = color.map(|c| [c.r, c.g, c.b, c.a]);
+                self.config.accent_color_rgba =
+                    color.map(|c| [c.r, c.g, c.b, c.a]);
+
                 save_needed = true;
             }
-            Message::TogglePanelBattery(val) => { self.config.show_panel_battery = val; save_needed = true; }
-            Message::TogglePanelBrightness(val) => { self.config.show_panel_brightness = val; save_needed = true; }
+
+            Message::TogglePanelBattery(val) => {
+                self.config.show_panel_battery = val;
+                save_needed = true;
+            }
+
+            Message::TogglePanelBrightness(val) => {
+                self.config.show_panel_brightness = val;
+                save_needed = true;
+            }
+
             Message::MoveModuleLeft(idx) => {
-                if idx > 0 && idx < self.config.panel_order.len() {
+                if idx > 0
+                    && idx < self.config.panel_order.len()
+                {
                     self.config.panel_order.swap(idx, idx - 1);
                     save_needed = true;
                 }
             }
+
             Message::MoveModuleRight(idx) => {
                 if idx + 1 < self.config.panel_order.len() {
                     self.config.panel_order.swap(idx, idx + 1);
                     save_needed = true;
                 }
             }
-            Message::ToggleDotGrid(val) => { self.config.show_dot_grid = val; save_needed = true; }
-            Message::SetDotSize(size) => { self.config.dot_size = size; save_needed = true; }
-            
+
+            Message::ToggleDotGrid(val) => {
+                self.config.show_dot_grid = val;
+                save_needed = true;
+            }
+
+            Message::ToggleAsciiBattery(val) => {
+                self.config.show_ascii_battery = val;
+                save_needed = true;
+            }
+
+            Message::SetDotSize(size) => {
+                self.config.dot_size = size;
+                save_needed = true;
+            }
+
+            Message::ToggleDarkMode(val) => {
+                self.dark_mode = val;
+
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_dark_mode(val)
+                        )
+                        .await
+                        .ok();
+                    },
+                    |_| cosmic::Action::App(Message::Tick),
+                );
+            }
+
+            Message::ToggleUseMonospace(val) => {
+                self.config.use_monospace_font = val;
+                save_needed = true;
+            }
+
+            Message::ToggleUseSystemAccent(val) => {
+                self.config.use_system_accent = val;
+                save_needed = true;
+            }
+
             Message::AdjustFontSize(delta) => {
-                self.config.panel_font_size = (self.config.panel_font_size as i16 + delta).clamp(6, 24) as u16;
+                self.config.panel_font_size =
+                    (self.config.panel_font_size as i16 + delta)
+                        .clamp(6, 24) as u16;
+
                 save_needed = true;
             }
+
             Message::AdjustBlockCount(delta) => {
-                self.config.panel_block_count = (self.config.panel_block_count as i16 + delta).clamp(1, 30) as usize;
+                self.config.panel_block_count =
+                    (self.config.panel_block_count as i16 + delta)
+                        .clamp(1, 30) as usize;
+
                 save_needed = true;
             }
+
             Message::AdjustSpacing(delta) => {
-                self.config.panel_spacing = (self.config.panel_spacing as i16 + delta).clamp(0, 32) as u16;
+                self.config.panel_spacing =
+                    (self.config.panel_spacing as i16 + delta)
+                        .clamp(0, 32) as u16;
+
                 save_needed = true;
             }
         }
 
-        if save_needed { save_config(&self.config); }
+        if save_needed {
+            let config_clone = self.config.clone();
+
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(
+                        move || save_config(&config_clone)
+                    )
+                    .await
+                    .ok();
+                },
+                |_| cosmic::Action::App(Message::Tick),
+            );
+        }
+
         Task::none()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        time::every(Duration::from_secs(3)).map(|_| Message::Tick)
+        time::every(Duration::from_secs(3))
+            .map(|_| Message::Tick)
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
         let active_theme = cosmic::theme::active();
-        let fallback_accent: Color = Color::from(active_theme.cosmic().accent.base);
-        let accent_color = self.config.accent_color_rgba.map(|[r, g, b, a]| Color::from_rgba(r, g, b, a));
 
-        let mut panel_items = row![].spacing(self.config.panel_spacing);
+        let fallback_accent: Color =
+            Color::from(active_theme.cosmic().accent.base);
+
+        let accent_color = if self.config.use_system_accent {
+            Some(fallback_accent)
+        } else {
+            self.config.accent_color_rgba.map(
+                |[r, g, b, a]|
+                    Color::from_rgba(r, g, b, a)
+            )
+        };
+
+        let mut panel_items =
+            row![].spacing(self.config.panel_spacing);
+
         let mut visible_count = 0;
         let blocks = self.config.panel_block_count;
 
         for module in &self.config.panel_order {
             match module {
-                PanelModule::Battery if self.config.show_panel_battery => {
+                PanelModule::Battery
+                    if self.config.show_panel_battery =>
+                {
                     visible_count += 1;
+
                     let pct = self.battery_percentage.min(100);
-                    let bat_color = accent_color.unwrap_or_else(|| get_tier_color(pct));
-                    let filled_count = ((pct as f32 / 100.0) * blocks as f32).round() as usize;
-                    let status_char = if self.is_charging { "⚡" } else { " " };
-                    
+
+                    let bat_color =
+                        accent_color.unwrap_or_else(
+                            || get_tier_color(pct)
+                        );
+
+                    let filled_count =
+                        ((pct as f32 / 100.0)
+                            * blocks as f32)
+                            .round() as usize;
+
+                    let status_char =
+                        if self.is_charging {
+                            "⚡"
+                        } else {
+                            " "
+                        };
+
                     let str_bat = format!(
                         "{:>3}% {}[{}{}]",
-                        pct, status_char, "█".repeat(filled_count), "░".repeat(blocks.saturating_sub(filled_count))
+                        pct,
+                        status_char,
+                        "█".repeat(filled_count),
+                        "░".repeat(
+                            blocks.saturating_sub(filled_count)
+                        )
                     );
 
                     let txt = text(str_bat)
+                        .font(cosmic::iced::Font::MONOSPACE)
                         .size(self.config.panel_font_size)
-                        .wrapping(cosmic::iced::widget::text::Wrapping::None)
-                        .class(cosmic::theme::Text::Color(bat_color));
+                        .wrapping(
+                            cosmic::iced::widget::text::Wrapping::None
+                        )
+                        .class(
+                            cosmic::theme::Text::Color(
+                                bat_color
+                            )
+                        );
+
                     panel_items = panel_items.push(txt);
                 }
 
-                PanelModule::Brightness if self.config.show_panel_brightness => {
+                PanelModule::Brightness
+                    if self.config.show_panel_brightness =>
+                {
                     visible_count += 1;
-                    let pct = self.brightness_percent.min(100);
-                    let bri_color = accent_color.unwrap_or_else(|| get_tier_color(pct));
-                    let filled_count = ((pct as f32 / 100.0) * blocks as f32).round() as usize;
-                    
+
+                    let pct =
+                        self.brightness_percent.min(100);
+
+                    let bri_color =
+                        accent_color.unwrap_or_else(
+                            || get_tier_color(pct)
+                        );
+
+                    let filled_count =
+                        ((pct as f32 / 100.0)
+                            * blocks as f32)
+                            .round() as usize;
+
                     let str_bri = format!(
                         "☼{:>3}%[{}{}]",
-                        pct, "█".repeat(filled_count), "░".repeat(blocks.saturating_sub(filled_count))
+                        pct,
+                        "█".repeat(filled_count),
+                        "░".repeat(
+                            blocks.saturating_sub(filled_count)
+                        )
                     );
 
                     let txt = text(str_bri)
+                        .font(cosmic::iced::Font::MONOSPACE)
                         .size(self.config.panel_font_size)
-                        .wrapping(cosmic::iced::widget::text::Wrapping::None)
-                        .class(cosmic::theme::Text::Color(bri_color));
+                        .wrapping(
+                            cosmic::iced::widget::text::Wrapping::None
+                        )
+                        .class(
+                            cosmic::theme::Text::Color(
+                                bri_color
+                            )
+                        );
+
                     panel_items = panel_items.push(txt);
                 }
+
                 _ => {}
             }
         }
 
         if visible_count == 0 {
             let txt = text("ASCII")
+                .font(cosmic::iced::Font::MONOSPACE)
                 .size(self.config.panel_font_size)
-                .class(cosmic::theme::Text::Color(accent_color.unwrap_or(fallback_accent)));
+                .class(
+                    cosmic::theme::Text::Color(
+                        accent_color.unwrap_or(fallback_accent)
+                    )
+                );
+
             panel_items = panel_items.push(txt);
         }
 
-        let clickable = mouse_area(panel_items).on_press(Message::ToggleMenu);
-        let content = container(clickable)
+        let content = container(panel_items)
             .width(cosmic::iced::Length::Shrink)
-            .height(cosmic::iced::Length::Shrink)
-            .clip(true);
+            .height(cosmic::iced::Length::Shrink);
 
-        self.core.applet.autosize_window(content).into()
+        let clickable =
+            mouse_area(content)
+                .on_press(Message::ToggleMenu);
+
+        self.core.applet.autosize_window(clickable).into()
     }
 
-    fn view_window(&self, _id: cosmic::iced::window::Id) -> Element<'_, Self::Message> {
+    fn view_window(
+        &self,
+        _id: cosmic::iced::window::Id,
+    ) -> Element<'_, Self::Message> {
         let active_theme = cosmic::theme::active();
-        let fallback_accent: Color = Color::from(active_theme.cosmic().accent.base);
 
-        let btn_main = button::custom(text("Control Deck").size(12))
-            .on_press(Message::SwitchTab(PopupTab::Main)).padding(6);
-        let btn_settings = button::custom(text("Customization").size(12))
-            .on_press(Message::SwitchTab(PopupTab::Settings)).padding(6);
-        let header_row = row![btn_main, btn_settings].spacing(8);
+        let fallback_accent: Color =
+            Color::from(active_theme.cosmic().accent.base);
 
-        let body_content: Element<'_, Self::Message> = match self.active_tab {
-            PopupTab::Main => self.view_main_deck(fallback_accent),
-            PopupTab::Settings => self.view_settings_deck(fallback_accent),
-        };
+        let ui_font = self.ui_font();
 
-        let content = column![header_row, body_content].spacing(12).padding(16);
+        let mut info_label = text("ⓘ").size(16);
+        let mut gear_label = text("⚙").size(16);
 
-        container(content)
-            .class(cosmic::theme::Container::Dropdown)
-            .width(cosmic::iced::Length::Fill)
-            .height(cosmic::iced::Length::Fill)
-            .into()
+        if let Some(f) = ui_font {
+            info_label = info_label.font(f);
+            gear_label = gear_label.font(f);
+        }
+
+        let info_btn = button::custom(info_label)
+            .on_press(Message::SwitchTab(PopupTab::About))
+            .padding(6);
+
+        let settings_btn =
+            button::custom(gear_label)
+                .on_press(
+                    if self.active_tab
+                        == PopupTab::Settings
+                    {
+                        Message::SwitchTab(PopupTab::Main)
+                    } else {
+                        Message::SwitchTab(PopupTab::Settings)
+                    }
+                )
+                .padding(6);
+
+        let header_row =
+            row![
+                info_btn,
+                Space::new()
+                    .width(cosmic::iced::Length::Fill),
+                settings_btn
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+        let body_content: Element<'_, Self::Message> =
+            match self.active_tab {
+                PopupTab::Main =>
+                    self.view_main_deck(fallback_accent),
+
+                PopupTab::Settings =>
+                    self.view_settings_deck(fallback_accent),
+
+                PopupTab::About =>
+                    self.view_about_deck(),
+            };
+
+        let content =
+            column![header_row, body_content]
+                .spacing(12)
+                .padding(16);
+
+        self.core.applet.popup_container(content).into()
     }
 }
 
 impl BatteryApplet {
-    fn view_main_deck(&self, _fallback_accent: Color) -> Element<'_, Message> {
+    fn ui_font(&self) -> Option<cosmic::iced::Font> {
+        if self.config.use_monospace_font {
+            Some(cosmic::iced::Font::MONOSPACE)
+        } else {
+            None
+        }
+    }
+
+    fn styled_text<'a>(
+        &self,
+        content: String,
+        size: u16,
+    ) -> cosmic::widget::Text<
+        'a,
+        cosmic::Theme,
+    > {
+        let mut t = text(content).size(size);
+
+        if let Some(f) = self.ui_font() {
+            t = t.font(f);
+        }
+
+        t
+    }
+
+    fn view_main_deck(
+        &self,
+        fallback_accent: Color,
+    ) -> Element<'_, Message> {
         let pct = self.battery_percentage.min(100);
-        let accent_color = self.config.accent_color_rgba.map(|[r, g, b, a]| Color::from_rgba(r, g, b, a));
-        let bat_color = accent_color.unwrap_or_else(|| get_tier_color(pct));
+
+        let accent_color =
+            if self.config.use_system_accent {
+                Some(fallback_accent)
+            } else {
+                self.config.accent_color_rgba.map(
+                    |[r, g, b, a]|
+                        Color::from_rgba(r, g, b, a)
+                )
+            };
+
+        let bat_color =
+            accent_color.unwrap_or_else(
+                || get_tier_color(pct)
+            );
 
         let time_str = match self.time_remaining {
             Some(secs) if secs > 0.0 => {
-                let h = (secs / 3600.0).floor() as u32;
-                let m = ((secs % 3600.0) / 60.0).floor() as u32;
-                if self.is_charging { format!("Time to full: {}h {}m", h, m) } 
-                else { format!("Time remaining: {}h {}m", h, m) }
+                let h =
+                    (secs / 3600.0).floor() as u32;
+
+                let m =
+                    ((secs % 3600.0) / 60.0)
+                        .floor() as u32;
+
+                if self.is_charging {
+                    format!(
+                        "Time to full: {}h {}m",
+                        h, m
+                    )
+                } else {
+                    format!(
+                        "Time remaining: {}h {}m",
+                        h, m
+                    )
+                }
             }
+
             _ => "Calculating time...".to_string(),
         };
-        let time_label = text(time_str).size(13);
 
-        let active_label = text(format!("Profile: {}", self.active_profile)).size(12);
-        let btn_save = button::custom(text("Power Saver").size(11))
-            .on_press(Message::SetProfile("power-saver".to_string())).padding(6);
-        let btn_bal = button::custom(text("Balanced").size(11))
-            .on_press(Message::SetProfile("balanced".to_string())).padding(6);
-        let btn_perf = button::custom(text("Performance").size(11))
-            .on_press(Message::SetProfile("performance".to_string())).padding(6);
-        let profile_row = row![btn_save, btn_bal, btn_perf].spacing(6);
+        let time_label =
+            self.styled_text(time_str, 13);
 
-        let bri_color = accent_color.unwrap_or_else(|| get_tier_color(self.brightness_percent));
-        let mut brightness_slider_row = row![].spacing(2);
-        let filled_bri_segments = ((self.brightness_percent as f32 / 100.0) * 10.0).round() as usize;
+        let mut stats_col =
+            column![time_label].spacing(4);
 
-        for i in 1..=10 {
-            let glyph = if i <= filled_bri_segments { "█" } else { "░" };
-            let target_pct = (i * 10) as u32;
-            let segment = mouse_area(text(glyph).size(15).class(cosmic::theme::Text::Color(bri_color)))
-                .on_press(Message::BrightnessPress(target_pct))
-                .on_enter(Message::BrightnessDragOver(target_pct))
-                .on_release(Message::BrightnessDragEnd);
-            brightness_slider_row = brightness_slider_row.push(segment);
+        if let (
+            Some(cur),
+            Some(des),
+            Some(health),
+        ) = (
+            self.current_wh,
+            self.design_wh,
+            self.health_percent,
+        ) {
+            stats_col =
+                stats_col.push(
+                    self.styled_text(
+                        format!(
+                            "Capacity: {:.1} Wh / {:.1} Wh ({:.1}% Health)",
+                            cur,
+                            des,
+                            health
+                        ),
+                        11,
+                    )
+                    .class(
+                        cosmic::theme::Text::Color(
+                            Color::from_rgb8(
+                                150, 150, 150
+                            )
+                        )
+                    ),
+                );
         }
 
-        let brightness_block = column![
-            text(format!("Brightness: {}%", self.brightness_percent)).size(12),
-            brightness_slider_row
-        ].spacing(4);
+        let profile_widget =
+            segmented_control::horizontal(
+                &self.profile_model
+            )
+            .on_activate(
+                Message::ProfileSelected
+            );
 
-        let mut main_col = column![time_label, active_label, profile_row, brightness_block].spacing(10);
+        let bri_color =
+            accent_color.unwrap_or_else(
+                || get_tier_color(
+                    self.brightness_percent
+                )
+            );
 
-        if self.config.show_dot_grid {
-            let filled_dots = pct.min(100) as usize;
+        let mut brightness_slider_row =
+            row![].spacing(2);
 
-            let font_sz = match self.config.dot_size {
-                DotSize::Standard => 13,
-                DotSize::Small => 9,
-                DotSize::Tiny => 5,
-            };
+        let filled_bri_segments =
+            ((self.brightness_percent as f32 / 100.0)
+                * 10.0)
+                .round() as usize;
 
-            let mut dot_grid = column![].spacing(1);
+        for i in 1..=10 {
+            let glyph =
+                if i <= filled_bri_segments {
+                    "█"
+                } else {
+                    "░"
+                };
 
-            for row_index in 0..10 {
-                let mut dot_row = row![].spacing(2);
+            let target_pct =
+                (i * 10) as u32;
 
-                for col_index in 0..10 {
-                    let i = row_index * 10 + col_index;
-                    let glyph = if i < filled_dots { '●' } else { '○' };
+            let segment = mouse_area(
+                text(glyph)
+                    .font(
+                        cosmic::iced::Font::MONOSPACE
+                    )
+                    .size(15)
+                    .class(
+                        cosmic::theme::Text::Color(
+                            bri_color
+                        )
+                    ),
+            )
+            .on_press(
+                Message::BrightnessPress(
+                    target_pct
+                )
+            )
+            .on_enter(
+                Message::BrightnessDragOver(
+                    target_pct
+                )
+            )
+            .on_release(
+                Message::BrightnessDragEnd
+            );
 
-                    let dot = text(glyph.to_string())
-                        .size(font_sz)
-                        .class(cosmic::theme::Text::Color(bat_color));
+            brightness_slider_row =
+                brightness_slider_row.push(
+                    segment
+                );
+        }
 
-                    dot_row = dot_row.push(dot);
-                }
-
-                dot_grid = dot_grid.push(dot_row);
-            }
-
-            let grid_block = column![
-                text(format!("Battery State: {pct}%")).size(12),
-                dot_grid,
+        let brightness_block =
+            column![
+                self.styled_text(
+                    format!(
+                        "☼ {}%",
+                        self.brightness_percent
+                    ),
+                    12
+                ),
+                brightness_slider_row
             ]
             .spacing(4);
 
-            main_col = main_col.push(grid_block);
+        // -------------------------------------------------
+        // DARK MODE — KEPT
+        // -------------------------------------------------
+
+        let theme_toggle =
+            cosmic::widget::toggler(self.dark_mode)
+                .on_toggle(
+                    Message::ToggleDarkMode
+                );
+
+        let theme_row =
+            row![
+                self.styled_text(
+                    "Dark mode".to_string(),
+                    12
+                ),
+                Space::new()
+                    .width(
+                        cosmic::iced::Length::Fill
+                    ),
+                theme_toggle,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8);
+
+        let theme_block =
+            column![
+                self.styled_text(
+                    "System theme".to_string(),
+                    12
+                ),
+                theme_row
+            ]
+            .spacing(4);
+
+        let mut left_col =
+            column![
+                stats_col,
+                profile_widget,
+                brightness_block,
+                theme_block,
+            ]
+            .spacing(12);
+
+        // -------------------------------------------------
+        // DOT GRID
+        // -------------------------------------------------
+
+        if self.config.show_dot_grid {
+            let filled_dots =
+                pct.min(100) as usize;
+
+            let font_sz =
+                match self.config.dot_size {
+                    DotSize::Standard => 13,
+                    DotSize::Small => 9,
+                    DotSize::Tiny => 5,
+                };
+
+            let mut dot_grid =
+                column![].spacing(1);
+
+            for row_index in 0..10 {
+                let mut dot_row =
+                    row![].spacing(2);
+
+                for col_index in 0..10 {
+                    let i =
+                        row_index * 10
+                            + col_index;
+
+                    let glyph =
+                        if i < filled_dots {
+                            '●'
+                        } else {
+                            '○'
+                        };
+
+                    let dot = text(
+                        glyph.to_string()
+                    )
+                    .font(
+                        cosmic::iced::Font::MONOSPACE
+                    )
+                    .size(font_sz)
+                    .class(
+                        cosmic::theme::Text::Color(
+                            bat_color
+                        )
+                    );
+
+                    dot_row =
+                        dot_row.push(dot);
+                }
+
+                dot_grid =
+                    dot_grid.push(dot_row);
+            }
+
+            let grid_block =
+                column![
+                    self.styled_text(
+                        format!(
+                            "Battery State: {pct}%"
+                        ),
+                        12
+                    ),
+                    dot_grid,
+                ]
+                .spacing(2);
+
+            left_col =
+                left_col.push(grid_block);
         }
 
-        container(main_col).into()
+        if self.config.show_ascii_battery {
+            let ascii_bat =
+                render_vertical_battery(
+                    pct,
+                    self.is_charging,
+                );
+
+            let ascii_widget =
+                text(ascii_bat)
+                    .font(
+                        cosmic::iced::Font::MONOSPACE
+                    )
+                    .size(13)
+                    .class(
+                        cosmic::theme::Text::Color(
+                            bat_color
+                        )
+                    );
+
+            let deck_row =
+                row![
+                    left_col,
+                    ascii_widget
+                ]
+                .spacing(16)
+                .align_y(Alignment::Center);
+
+            container(deck_row).into()
+        } else {
+            container(left_col).into()
+        }
     }
 
-    fn view_settings_deck(&self, fallback_accent: Color) -> Element<'_, Message> {
-        let btn_tog_bat = button::custom(text(if self.config.show_panel_battery { "[x] Battery" } else { "[ ] Battery" }).size(11))
-            .on_press(Message::TogglePanelBattery(!self.config.show_panel_battery)).padding(4);
-        let btn_tog_bri = button::custom(text(if self.config.show_panel_brightness { "[x] Brightness" } else { "[ ] Brightness" }).size(11))
-            .on_press(Message::TogglePanelBrightness(!self.config.show_panel_brightness)).padding(4);
+    fn view_settings_deck(
+        &self,
+        fallback_accent: Color,
+    ) -> Element<'_, Message> {
+        let btn_tog_bat =
+            button::custom(
+                text(
+                    if self.config.show_panel_battery {
+                        "[x] Panel Battery"
+                    } else {
+                        "[ ] Panel Battery"
+                    }
+                )
+                .size(11),
+            )
+            .on_press(
+                Message::TogglePanelBattery(
+                    !self.config.show_panel_battery
+                ),
+            )
+            .padding(4);
 
-        let panel_toggles = column![
-            text("Top Panel Elements:").size(12),
-            row![btn_tog_bat, btn_tog_bri].spacing(6)
-        ].spacing(4);
+        let btn_tog_bri =
+            button::custom(
+                text(
+                    if self.config.show_panel_brightness {
+                        "[x] Brightness"
+                    } else {
+                        "[ ] Brightness"
+                    }
+                )
+                .size(11),
+            )
+            .on_press(
+                Message::TogglePanelBrightness(
+                    !self.config.show_panel_brightness
+                ),
+            )
+            .padding(4);
 
-        // Dimensional Sliders / Buttons
-       let font_row = row![
-            text(format!("Text Size: {}", self.config.panel_font_size)).size(11),
-            button::custom(text("-").size(10)).on_press(Message::AdjustFontSize(-1)).padding(4),
-            button::custom(text("+").size(10)).on_press(Message::AdjustFontSize(1)).padding(4)
-        ].spacing(8).align_y(Alignment::Center);
+        let panel_toggles =
+            column![
+                self.styled_text(
+                    "Panel".to_string(),
+                    12
+                ),
+                row![
+                    btn_tog_bat,
+                    btn_tog_bri
+                ]
+                .spacing(6)
+            ]
+            .spacing(4);
 
-        let block_row = row![
-            text(format!("ASCII Blocks: {}", self.config.panel_block_count)).size(11),
-            button::custom(text("-").size(10)).on_press(Message::AdjustBlockCount(-1)).padding(4),
-            button::custom(text("+").size(10)).on_press(Message::AdjustBlockCount(1)).padding(4)
-        ].spacing(8).align_y(Alignment::Center);
+        // -------------------------------------------------
+        // DOT GRID TOGGLE — PROPER COSMIC TOGGLE
+        // -------------------------------------------------
 
-        let space_row = row![
-            text(format!("Spacing: {}", self.config.panel_spacing)).size(11),
-            button::custom(text("-").size(10)).on_press(Message::AdjustSpacing(-1)).padding(4),
-            button::custom(text("+").size(10)).on_press(Message::AdjustSpacing(1)).padding(4)
-        ].spacing(8).align_y(Alignment::Center);
-        
-        let dims_col = column![
-            text("Panel Dimensions:").size(12),
-            font_row, block_row, space_row
-        ].spacing(4);
+        let dot_toggle =
+            cosmic::widget::toggler(
+                self.config.show_dot_grid
+            )
+            .on_toggle(
+                Message::ToggleDotGrid
+            );
 
-        let mut reorder_col = column![text("Panel Element Order:").size(12)].spacing(4);
-        for (idx, module) in self.config.panel_order.iter().enumerate() {
-            let name = match module {
-                PanelModule::Battery => "Battery",
-                PanelModule::Brightness => "Brightness",
-            };
-            let btn_left = button::custom(text("<").size(10)).on_press(Message::MoveModuleLeft(idx)).padding(3);
-            let btn_right = button::custom(text(">").size(10)).on_press(Message::MoveModuleRight(idx)).padding(3);
-            reorder_col = reorder_col.push(row![text(format!("{}. {}", idx + 1, name)).size(11), btn_left, btn_right].spacing(6));
+        let dot_row =
+            row![
+                self.styled_text(
+                    "Show Dot Grid".to_string(),
+                    12
+                ),
+                Space::new()
+                    .width(
+                        cosmic::iced::Length::Fill
+                    ),
+                dot_toggle,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8);
+
+        // -------------------------------------------------
+        // ASCII BATTERY TOGGLE
+        // -------------------------------------------------
+
+        let ascii_toggle =
+            cosmic::widget::toggler(
+                self.config.show_ascii_battery
+            )
+            .on_toggle(
+                Message::ToggleAsciiBattery
+            );
+
+        let ascii_row =
+            row![
+                self.styled_text(
+                    "Show ASCII Battery".to_string(),
+                    12
+                ),
+                Space::new()
+                    .width(
+                        cosmic::iced::Length::Fill
+                    ),
+                ascii_toggle,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8);
+
+        let deck_toggles =
+            column![
+                self.styled_text(
+                    "Popup Deck Modules".to_string(),
+                    12
+                ),
+                dot_row,
+                ascii_row,
+            ]
+            .spacing(8);
+
+        let font_row =
+            row![
+                self.styled_text(
+                    format!(
+                        "Text Size: {}",
+                        self.config.panel_font_size
+                    ),
+                    11
+                ),
+                button::custom(
+                    text("-").size(10)
+                )
+                .on_press(
+                    Message::AdjustFontSize(-1)
+                )
+                .padding(4),
+                button::custom(
+                    text("+").size(10)
+                )
+                .on_press(
+                    Message::AdjustFontSize(1)
+                )
+                .padding(4),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+        let block_row =
+            row![
+                self.styled_text(
+                    format!(
+                        "ASCII Blocks: {}",
+                        self.config.panel_block_count
+                    ),
+                    11
+                ),
+                button::custom(
+                    text("-").size(10)
+                )
+                .on_press(
+                    Message::AdjustBlockCount(-1)
+                )
+                .padding(4),
+                button::custom(
+                    text("+").size(10)
+                )
+                .on_press(
+                    Message::AdjustBlockCount(1)
+                )
+                .padding(4),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+        let space_row =
+            row![
+                self.styled_text(
+                    format!(
+                        "Spacing: {}",
+                        self.config.panel_spacing
+                    ),
+                    11
+                ),
+                button::custom(
+                    text("-").size(10)
+                )
+                .on_press(
+                    Message::AdjustSpacing(-1)
+                )
+                .padding(4),
+                button::custom(
+                    text("+").size(10)
+                )
+                .on_press(
+                    Message::AdjustSpacing(1)
+                )
+                .padding(4),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+        let dims_col =
+            column![
+                font_row,
+                block_row,
+                space_row
+            ]
+            .spacing(4);
+
+        let mut reorder_col =
+            column![].spacing(4);
+
+        for (idx, module) in
+            self.config.panel_order.iter().enumerate()
+        {
+            let name =
+                match module {
+                    PanelModule::Battery =>
+                        "Battery",
+                    PanelModule::Brightness =>
+                        "Brightness",
+                };
+
+            let btn_left =
+                button::custom(
+                    text("<").size(10)
+                )
+                .on_press(
+                    Message::MoveModuleLeft(idx)
+                )
+                .padding(3);
+
+            let btn_right =
+                button::custom(
+                    text(">").size(10)
+                )
+                .on_press(
+                    Message::MoveModuleRight(idx)
+                )
+                .padding(3);
+
+            reorder_col =
+                reorder_col.push(
+                    row![
+                        text(
+                            format!(
+                                "{}. {}",
+                                idx + 1,
+                                name
+                            )
+                        )
+                        .size(11),
+                        btn_left,
+                        btn_right,
+                    ]
+                    .spacing(6)
+                );
         }
 
-        let color_options: [(&str, Option<Color>); 8] = [
-            ("Auto", None),
-            ("Blue", Some(Color::from_rgb8(100, 170, 255))),
-            ("Green", Some(Color::from_rgb8(120, 220, 120))),
-            ("Purple", Some(Color::from_rgb8(190, 130, 255))),
-            ("Pink", Some(Color::from_rgb8(255, 130, 200))),
-            ("Orange", Some(Color::from_rgb8(255, 165, 60))),
-            ("White", Some(Color::from_rgb8(230, 230, 230))),
-            ("Rust", Some(Color::from_rgb8(170, 69, 36))),
-        ];
+        let mono_toggle =
+            cosmic::widget::toggler(
+                self.config.use_monospace_font
+            )
+            .on_toggle(
+                Message::ToggleUseMonospace
+            );
 
-        let mut color_row = row![].spacing(4);
-        for (label, color) in color_options {
-            let swatch_color = color.unwrap_or(fallback_accent);
-            let btn = button::custom(text(label).size(10).class(cosmic::theme::Text::Color(swatch_color)))
-                .on_press(Message::SetAccentColor(color)).padding(5);
-            color_row = color_row.push(btn);
+        let mono_row =
+            row![
+                self.styled_text(
+                    "Use monospace font".to_string(),
+                    12
+                ),
+                Space::new()
+                    .width(
+                        cosmic::iced::Length::Fill
+                    ),
+                mono_toggle,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8);
+
+        let accent_toggle =
+            cosmic::widget::toggler(
+                self.config.use_system_accent
+            )
+            .on_toggle(
+                Message::ToggleUseSystemAccent
+            );
+
+        let accent_row =
+            row![
+                self.styled_text(
+                    "Use system accent".to_string(),
+                    12
+                ),
+                Space::new()
+                    .width(
+                        cosmic::iced::Length::Fill
+                    ),
+                accent_toggle,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8);
+
+        let mut appearance_col =
+            column![
+                self.styled_text(
+                    "Appearance".to_string(),
+                    12
+                ),
+                mono_row,
+                accent_row,
+            ]
+            .spacing(8);
+
+        if !self.config.use_system_accent {
+            let color_options:
+                [(&str, Option<Color>); 8] =
+                [
+                    ("Auto", None),
+                    (
+                        "Blue",
+                        Some(
+                            Color::from_rgb8(
+                                100, 170, 255
+                            )
+                        ),
+                    ),
+                    (
+                        "Green",
+                        Some(
+                            Color::from_rgb8(
+                                120, 220, 120
+                            )
+                        ),
+                    ),
+                    (
+                        "Purple",
+                        Some(
+                            Color::from_rgb8(
+                                190, 130, 255
+                            )
+                        ),
+                    ),
+                    (
+                        "Pink",
+                        Some(
+                            Color::from_rgb8(
+                                255, 130, 200
+                            )
+                        ),
+                    ),
+                    (
+                        "Orange",
+                        Some(
+                            Color::from_rgb8(
+                                255, 165, 60
+                            )
+                        ),
+                    ),
+                    (
+                        "White",
+                        Some(
+                            Color::from_rgb8(
+                                230, 230, 230
+                            )
+                        ),
+                    ),
+                    (
+                        "Rust",
+                        Some(
+                            Color::from_rgb8(
+                                170, 69, 36
+                            )
+                        ),
+                    ),
+                ];
+
+            let mut color_row =
+                row![].spacing(4);
+
+            for (label, color)
+                in color_options
+            {
+                let swatch_color =
+                    color.unwrap_or(
+                        fallback_accent
+                    );
+
+                let btn =
+                    button::custom(
+                        text(label)
+                            .size(10)
+                            .class(
+                                cosmic::theme::Text::Color(
+                                    swatch_color
+                                )
+                            ),
+                    )
+                    .on_press(
+                        Message::SetAccentColor(
+                            color
+                        )
+                    )
+                    .padding(5);
+
+                color_row =
+                    color_row.push(btn);
+            }
+
+            appearance_col =
+                appearance_col.push(
+                    column![
+                        self.styled_text(
+                            "Color Accent Override"
+                                .to_string(),
+                            11
+                        ),
+                        color_row,
+                    ]
+                    .spacing(4),
+                );
         }
-        let color_block = column![text("Global Color Accent Override:").size(12), color_row].spacing(4);
 
-        container(column![panel_toggles, dims_col, reorder_col, color_block].spacing(12)).into()
+        container(
+            column![
+                panel_toggles,
+                deck_toggles,
+                dims_col,
+                reorder_col,
+                appearance_col,
+            ]
+            .spacing(16),
+        )
+        .into()
+    }
+
+    fn view_about_deck(
+        &self,
+    ) -> Element<'_, Message> {
+        let title =
+            self.styled_text(
+                "ASCII Battery".to_string(),
+                16,
+            );
+
+        let author =
+            self.styled_text(
+                "pewmoe".to_string(),
+                12,
+            );
+
+        let version =
+            self.styled_text(
+                APP_VERSION.to_string(),
+                11,
+            );
+
+        let tagline =
+            self.styled_text(
+                "ASCII Battery applet for the COSMIC desktop"
+                    .to_string(),
+                11,
+            );
+
+        let links_col =
+            column![
+                self.styled_text(
+                    "Links".to_string(),
+                    12
+                ),
+                self.styled_text(
+                    "Repository: github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet"
+                        .to_string(),
+                    10
+                ),
+                self.styled_text(
+                    "Support: (same repository, open an issue)"
+                        .to_string(),
+                    10
+                ),
+            ]
+            .spacing(4);
+
+        let license_col =
+            column![
+                self.styled_text(
+                    "License".to_string(),
+                    12
+                ),
+                self.styled_text(
+                    "MPL-2.0-only".to_string(),
+                    10
+                ),
+            ]
+            .spacing(4);
+
+        container(
+            column![
+                title,
+                author,
+                version,
+                tagline,
+                links_col,
+                license_col,
+            ]
+            .spacing(10),
+        )
+        .into()
     }
 }
 
 fn get_config_path() -> PathBuf {
-    let mut path = PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        format!("{}/.config", std::env::var("HOME").unwrap_or_default())
-    }));
-    path.push("com.github.pewmoe.cosmic-ext-ASCII-deck");
-    std::fs::create_dir_all(&path).ok();
+    let mut path =
+        PathBuf::from(
+            std::env::var(
+                "XDG_CONFIG_HOME"
+            )
+            .unwrap_or_else(|_| {
+                format!(
+                    "{}/.config",
+                    std::env::var(
+                        "HOME"
+                    )
+                    .unwrap_or_default()
+                )
+            }),
+        );
+
+    path.push(
+        "com.github.pewmoe.cosmic-ext-ASCII-deck",
+    );
+
+    std::fs::create_dir_all(
+        &path
+    )
+    .ok();
+
     path.push("config.json");
+
     path
 }
 
 fn load_config() -> AppletConfig {
     let path = get_config_path();
-    if let Ok(data) = std::fs::read_to_string(path) {
-        if let Ok(config) = serde_json::from_str(&data) {
+
+    if let Ok(data) =
+        std::fs::read_to_string(path)
+    {
+        if let Ok(config) =
+            serde_json::from_str(&data)
+        {
             return config;
         }
     }
+
     AppletConfig::default()
 }
 
 fn save_config(config: &AppletConfig) {
     let path = get_config_path();
-    if let Ok(data) = serde_json::to_string_pretty(config) {
-        std::fs::write(path, data).ok();
+
+    if let Ok(data) =
+        serde_json::to_string_pretty(config)
+    {
+        std::fs::write(
+            path,
+            data
+        )
+        .ok();
     }
 }
 
 fn fetch_all_states() -> Task<Message> {
     Task::batch(vec![
         Task::perform(
-            async { tokio::task::spawn_blocking(get_battery_info).await.unwrap_or(None) },
-            |res| cosmic::Action::App(Message::BatteryFetched(res)),
+            async {
+                tokio::task::spawn_blocking(
+                    get_battery_info
+                )
+                .await
+                .unwrap_or(None)
+            },
+            |res| {
+                cosmic::Action::App(
+                    Message::BatteryFetched(res)
+                )
+            },
         ),
+
         Task::perform(
-            async { tokio::task::spawn_blocking(get_active_profile).await.unwrap_or(None) },
-            |res| cosmic::Action::App(Message::ProfileFetched(res)),
+            async {
+                tokio::task::spawn_blocking(
+                    get_active_profile
+                )
+                .await
+                .unwrap_or(None)
+            },
+            |res| {
+                cosmic::Action::App(
+                    Message::ProfileFetched(res)
+                )
+            },
         ),
+
         Task::perform(
-            async { tokio::task::spawn_blocking(get_brightness_percent).await.unwrap_or(None) },
-            |res| cosmic::Action::App(Message::BrightnessFetched(res)),
+            async {
+                tokio::task::spawn_blocking(
+                    get_brightness_percent
+                )
+                .await
+                .unwrap_or(None)
+            },
+            |res| {
+                cosmic::Action::App(
+                    Message::BrightnessFetched(res)
+                )
+            },
+        ),
+
+        Task::perform(
+            async {
+                tokio::task::spawn_blocking(
+                    get_dark_mode
+                )
+                .await
+                .unwrap_or(None)
+            },
+            |res| {
+                cosmic::Action::App(
+                    Message::DarkModeFetched(res)
+                )
+            },
         ),
     ])
 }
 
-fn get_tier_color(pct: u32) -> Color {
+fn get_tier_color(
+    pct: u32,
+) -> Color {
     match pct {
-        0..=20 => Color::from_rgb8(255, 60, 60),
-        21..=50 => Color::from_rgb8(255, 165, 0),
-        51..=70 => Color::from_rgb8(255, 220, 0),
-        _ => Color::from_rgb8(180, 220, 255),
+        0..=20 =>
+            Color::from_rgb8(
+                255, 60, 60
+            ),
+
+        21..=50 =>
+            Color::from_rgb8(
+                255, 165, 0
+            ),
+
+        51..=70 =>
+            Color::from_rgb8(
+                255, 220, 0
+            ),
+
+        _ =>
+            Color::from_rgb8(
+                180, 220, 255
+            ),
     }
 }
 
-fn get_battery_info() -> Option<BatteryState> {
-    let manager = starship_battery::Manager::new().ok()?;
-    let mut batteries = manager.batteries().ok()?;
-    let bat = batteries.next()?.ok()?;
-    let percentage = (bat.state_of_charge().value * 100.0) as u32;
-    let state = bat.state();
-    let is_charging = matches!(state, starship_battery::State::Charging | starship_battery::State::Full);
-    let time_remaining = match state {
-        starship_battery::State::Charging => bat.time_to_full().map(|t| t.value),
-        starship_battery::State::Discharging => bat.time_to_empty().map(|t| t.value),
-        _ => None,
-    };
-    Some(BatteryState { percentage, is_charging, time_remaining })
+fn get_extended_battery_info()
+    -> Option<(f32, f32, f32)>
+{
+    if let Ok(paths) =
+        std::fs::read_dir(
+            "/sys/class/power_supply"
+        )
+    {
+        for entry in paths.flatten() {
+            let name =
+                entry.file_name()
+                    .into_string()
+                    .unwrap_or_default();
+
+            if name.starts_with("BAT") {
+                let base =
+                    entry.path();
+
+                let read_micro =
+                    |file: &str|
+                    -> Option<f32> {
+                        std::fs::read_to_string(
+                            base.join(file)
+                        )
+                        .ok()?
+                        .trim()
+                        .parse::<f32>()
+                        .ok()
+                    };
+
+                let (current, full, design) =
+                    if let (
+                        Some(c),
+                        Some(f),
+                        Some(d),
+                    ) = (
+                        read_micro(
+                            "energy_now"
+                        ),
+                        read_micro(
+                            "energy_full"
+                        ),
+                        read_micro(
+                            "energy_full_design"
+                        ),
+                    ) {
+                        (c, f, d)
+                    } else if let (
+                        Some(c),
+                        Some(f),
+                        Some(d),
+                    ) = (
+                        read_micro(
+                            "charge_now"
+                        ),
+                        read_micro(
+                            "charge_full"
+                        ),
+                        read_micro(
+                            "charge_full_design"
+                        ),
+                    ) {
+                        let v =
+                            read_micro(
+                                "voltage_now"
+                            )
+                            .unwrap_or(
+                                10_000_000.0
+                            );
+
+                        (
+                            c * v
+                                / 1_000_000.0,
+                            f * v
+                                / 1_000_000.0,
+                            d * v
+                                / 1_000_000.0,
+                        )
+                    } else {
+                        continue;
+                    };
+
+                let divisor =
+                    1_000_000.0;
+
+                let current_wh =
+                    current / divisor;
+
+                let full_wh =
+                    full / divisor;
+
+                let design_wh =
+                    design / divisor;
+
+                let health =
+                    if design_wh > 0.0 {
+                        (full_wh
+                            / design_wh)
+                            * 100.0
+                    } else {
+                        100.0
+                    };
+
+                return Some((
+                    current_wh,
+                    design_wh,
+                    health,
+                ));
+            }
+        }
+    }
+
+    None
 }
 
-fn power_profiles_proxy(connection: &Connection) -> zbus::Result<Proxy<'_>> {
-    Proxy::new(connection, "net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles")
+fn get_battery_info()
+    -> Option<BatteryState>
+{
+    let manager =
+        starship_battery::Manager::new()
+            .ok()?;
+
+    let mut batteries =
+        manager.batteries().ok()?;
+
+    let bat =
+        batteries.next()?.ok()?;
+
+    let percentage =
+        (bat.state_of_charge().value
+            * 100.0) as u32;
+
+    let state =
+        bat.state();
+
+    let is_charging =
+        matches!(
+            state,
+            starship_battery::State::Charging
+                | starship_battery::State::Full
+        );
+
+    let time_remaining =
+        match state {
+            starship_battery::State::Charging =>
+                bat.time_to_full()
+                    .map(|t| t.value),
+
+            starship_battery::State::Discharging =>
+                bat.time_to_empty()
+                    .map(|t| t.value),
+
+            _ => None,
+        };
+
+    let (
+        current_wh,
+        design_wh,
+        health_percent,
+    ) =
+        get_extended_battery_info()
+            .map(
+                |(c, d, h)|
+                    (
+                        Some(c),
+                        Some(d),
+                        Some(h),
+                    )
+            )
+            .unwrap_or((
+                None,
+                None,
+                None,
+            ));
+
+    Some(
+        BatteryState {
+            percentage,
+            is_charging,
+            time_remaining,
+            current_wh,
+            design_wh,
+            health_percent,
+        }
+    )
 }
 
-fn get_active_profile() -> Option<String> {
-    let connection = Connection::system().ok()?;
-    let proxy = power_profiles_proxy(&connection).ok()?;
-    proxy.get_property("ActiveProfile").ok()
+fn power_profiles_proxy(
+    connection: &Connection,
+) -> zbus::Result<Proxy<'_>> {
+    Proxy::new(
+        connection,
+        "net.hadess.PowerProfiles",
+        "/net/hadess/PowerProfiles",
+        "net.hadess.PowerProfiles",
+    )
 }
 
-fn set_active_profile(profile: &str) -> zbus::Result<()> {
-    let connection = Connection::system()?;
-    power_profiles_proxy(&connection)?.set_property("ActiveProfile", profile)?;
+fn get_active_profile()
+    -> Option<String>
+{
+    let connection =
+        Connection::system().ok()?;
+
+    let proxy =
+        power_profiles_proxy(
+            &connection
+        )
+        .ok()?;
+
+    proxy
+        .get_property(
+            "ActiveProfile"
+        )
+        .ok()
+}
+
+fn set_active_profile(
+    profile: &str,
+) -> zbus::Result<()> {
+    let connection =
+        Connection::system()?;
+
+    power_profiles_proxy(
+        &connection
+    )?
+    .set_property(
+        "ActiveProfile",
+        profile
+    )?;
+
     Ok(())
 }
 
-fn backlight_device_name() -> Option<String> {
-    std::fs::read_dir("/sys/class/backlight").ok()?
-        .filter_map(|e| e.ok())
-        .next()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
+fn backlight_device_name()
+    -> Option<String>
+{
+    std::fs::read_dir(
+        "/sys/class/backlight"
+    )
+    .ok()?
+    .filter_map(|e| e.ok())
+    .next()
+    .map(
+        |e|
+            e.file_name()
+                .to_string_lossy()
+                .into_owned()
+    )
 }
 
-fn get_brightness_percent() -> Option<u32> {
-    let name = backlight_device_name()?;
-    let base = format!("/sys/class/backlight/{name}");
-    let current: u32 = std::fs::read_to_string(format!("{base}/brightness")).ok()?.trim().parse().ok()?;
-    let max: u32 = std::fs::read_to_string(format!("{base}/max_brightness")).ok()?.trim().parse().ok()?;
-    if max == 0 { return None; }
-    Some(((current as f32 / max as f32) * 100.0).round() as u32)
+fn get_brightness_percent()
+    -> Option<u32>
+{
+    let name =
+        backlight_device_name()?;
+
+    let base =
+        format!(
+            "/sys/class/backlight/{name}"
+        );
+
+    let current: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/brightness"
+            )
+        )
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+
+    let max: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/max_brightness"
+            )
+        )
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+
+    if max == 0 {
+        return None;
+    }
+
+    Some(
+        (
+            (current as f32
+                / max as f32)
+                * 100.0
+        )
+        .round() as u32
+    )
 }
 
-fn get_session_path(connection: &Connection) -> zbus::Result<zbus::zvariant::OwnedObjectPath> {
-    let manager = Proxy::new(connection, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager")?;
-    type SessionEntry = (String, u32, String, String, zbus::zvariant::OwnedObjectPath);
-    let sessions: Vec<SessionEntry> = manager.call("ListSessions", &())?;
-    
-    if let Ok(session_id) = std::env::var("XDG_SESSION_ID") {
-        if let Some((_, _, _, _, path)) = sessions.iter().find(|(id, ..)| *id == session_id) {
+fn get_session_path(
+    connection: &Connection,
+) -> zbus::Result<
+    zbus::zvariant::OwnedObjectPath
+> {
+    let manager =
+        Proxy::new(
+            connection,
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+        )?;
+
+    type SessionEntry =
+        (
+            String,
+            u32,
+            String,
+            String,
+            zbus::zvariant::OwnedObjectPath,
+        );
+
+    let sessions:
+        Vec<SessionEntry> =
+        manager.call(
+            "ListSessions",
+            &()
+        )?;
+
+    if let Ok(session_id) =
+        std::env::var(
+            "XDG_SESSION_ID"
+        )
+    {
+        if let Some(
+            (_, _, _, _, path)
+        ) =
+            sessions.iter().find(
+                |(id, ..)|
+                    *id == session_id
+            )
+        {
             return Ok(path.clone());
         }
     }
-    
-    sessions.into_iter().next().map(|(_, _, _, _, path)| path)
-        .ok_or_else(|| zbus::Error::Failure("no active logind session found".into()))
+
+    sessions
+        .into_iter()
+        .next()
+        .map(
+            |(_, _, _, _, path)|
+                path
+        )
+        .ok_or_else(
+            || {
+                zbus::Error::Failure(
+                    "no active logind session found"
+                        .into()
+                )
+            }
+        )
 }
 
-fn set_brightness_percent(pct: u32) -> zbus::Result<()> {
-    let name = backlight_device_name().ok_or_else(|| zbus::Error::Failure("no backlight device found".into()))?;
-    let base = format!("/sys/class/backlight/{name}");
-    let max: u32 = std::fs::read_to_string(format!("{base}/max_brightness")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(100);
-    let target = ((pct.min(100) as f32 / 100.0) * max as f32).round() as u32;
+fn set_brightness_percent(
+    pct: u32,
+) -> zbus::Result<()> {
+    let name =
+        backlight_device_name()
+            .ok_or_else(
+                || {
+                    zbus::Error::Failure(
+                        "no backlight device found"
+                            .into()
+                    )
+                }
+            )?;
 
-    let connection = Connection::system()?;
-    let session_path = get_session_path(&connection)?;
-    let session = Proxy::new(&connection, "org.freedesktop.login1", session_path, "org.freedesktop.login1.Session")?;
-    session.call::<_, _, ()>("SetBrightness", &("backlight", name.as_str(), target))?;
+    let base =
+        format!(
+            "/sys/class/backlight/{name}"
+        );
+
+    let max: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/max_brightness"
+            )
+        )
+        .ok()
+        .and_then(
+            |s|
+                s.trim()
+                    .parse()
+                    .ok()
+        )
+        .unwrap_or(100);
+
+    let target =
+        (
+            (pct.min(100) as f32
+                / 100.0)
+                * max as f32
+        )
+        .round() as u32;
+
+    let connection =
+        Connection::system()?;
+
+    let session_path =
+        get_session_path(
+            &connection
+        )?;
+
+    let session =
+        Proxy::new(
+            &connection,
+            "org.freedesktop.login1",
+            session_path,
+            "org.freedesktop.login1.Session",
+        )?;
+
+    session.call::<_, _, ()>(
+        "SetBrightness",
+        &(
+            "backlight",
+            name.as_str(),
+            target
+        ),
+    )?;
+
     Ok(())
 }
 
-fn main() -> cosmic::iced::Result {
+// -----------------------------------------------------
+// COSMIC SYSTEM DARK MODE
+// -----------------------------------------------------
+
+fn get_dark_mode()
+    -> Option<bool>
+{
+    let config =
+        cosmic_config::Config::new(
+            "com.system76.CosmicTheme.Mode",
+            1,
+        )
+        .ok()?;
+
+    config
+        .get::<bool>("is_dark")
+        .ok()
+}
+
+fn set_dark_mode(
+    is_dark: bool,
+) -> Option<()> {
+    let config =
+        cosmic_config::Config::new(
+            "com.system76.CosmicTheme.Mode",
+            1,
+        )
+        .ok()?;
+
+    config
+        .set("is_dark", is_dark)
+        .ok()
+}
+
+fn main()
+    -> cosmic::iced::Result
+{
     cosmic::applet::run::<BatteryApplet>(())
 }
+// the dark mode is kinda finicky. idk why havent thought about it much
+//anyways thanks for reading the code

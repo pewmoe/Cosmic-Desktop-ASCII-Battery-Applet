@@ -1,36 +1,82 @@
-# Cosmic Ascii Battery
+# ASCII Deck
 
-A compact battery indicator applet for the [COSMIC](https://system76.com/cosmic) desktop panel — shown as an ASCII block bar instead of a traditional icon.
+A compact, customizable control applet for the [COSMIC](https://system76.com/cosmic) desktop panel — built around ASCII-style battery and brightness controls instead of traditional icons.
 
-```
-87% ⚡[██████░░]
+```text
+87% ⚡[█████████░]
 ```
 
 ## Features
 
-- **Battery percentage and charge status** as a live-updating block bar directly in the panel, alongside a charging indicator
-- **Automatically resizes** with your configured panel size — no fixed/cramped layout
-- **Click to open a popup** showing:
-  - Estimated time to full charge / time remaining / brightness slider
-  - **Power profile switching** (Power Saver / Balanced / Performance)
-  - **ASCII brightness slider** — click any segment to set screen brightness
-  - **Accent color picker** — choose a fixed color, or leave it on Auto to color-code by charge level (red/orange/yellow/blue)
-  - **brightness toggle** - toggle ASCII brightness bar on/off from the customization tab
-  - **CUSTOMIZATION** add/remove ASCII bars (no volume yet cause flatpak is annoying)
+* **Live battery indicator** with:
+
+  * Battery percentage
+  * Charging indicator
+  * ASCII block bar
+  * Automatic panel sizing
+  * Charge-level colors
+
+* **Popup control deck** with:
+
+  * Estimated time to full charge / time remaining
+  * Battery capacity and health information
+  * Power profile switching
+
+    * Power Saver
+    * Balanced
+    * Performance
+  * ASCII brightness slider
+  * Screen brightness control
+
+* **ASCII battery visualization**
+
+  * Vertical ASCII battery
+  * Charging lightning indicator
+  * Adjustable display options
+
+* **100-dot battery grid**
+
+  * Displays battery charge as a 10×10 dot grid
+  * Filled and empty dots show the current charge level
+  * Adjustable dot size
+  * Can be enabled or disabled with a toggle
+
+* **Panel customization**
+
+  * Toggle battery display
+  * Toggle brightness display
+  * Change panel text size
+  * Adjust ASCII block count
+  * Adjust spacing
+  * Reorder panel modules
+
+* **Appearance customization**
+
+  * Dark Mode toggle
+  * System accent color support
+  * Custom accent colors
+  * Optional monospace font
+
+* **Automatic configuration saving**
+
+  * Settings persist between launches
 
 ## Installation
 
-### Via COSMIC Flatpak repo (recommended)
+### Via the COSMIC Flatpak repository
 
-This applet is submitted to [pop-os/cosmic-flatpak](https://github.com/pop-os/cosmic-flatpak) and pending review. Once merged:
+This applet is submitted to the COSMIC Flatpak repository and is pending review.
+
+Once available:
 
 ```bash
 flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
 flatpak install --user cosmic com.github.pewmoe.cosmic-ext-ascii-dot-battery
-
 ```
 
-Then add it to your panel via **Settings → Desktop → Panel (or Dock) → Add applet**.
+Then add it to your panel through:
+
+**Settings → Desktop → Panel → Add Applet**
 
 ### Building from source
 
@@ -43,28 +89,40 @@ just build-release
 sudo just install
 ```
 
-Restart the panel (`killall cosmic-panel`) (or what ever your kill command is) and add the applet from Settings as above.
+Restart COSMIC Panel and add the applet from the panel settings.
 
-## Known issues
+For example:
 
-- **the notification applet disappearing is a problem from the notification applet not my applet, just reboot or logout and it will be fixed.**
-- **the frosted glass effect doesn't work yet cause i cant be bothered to troubleshoot it please dont ask for it**
+```bash
+killall cosmic-panel
+```
+
 ## Development
 
 ```bash
-just build-debug     # debug build
-just run             # run locally for testing
-just check           # clippy
+just build-debug     # Build a debug version
+just build-release   # Build an optimized release
+just run             # Run locally for testing
+just check           # Run checks / clippy
 ```
+
+## Known Issues
+
+* The **notification applet disappearing** issue is related to the COSMIC notification applet rather than ASCII Deck. Logging out, rebooting, or restarting the relevant COSMIC components can restore it.
+* The **Dark mode** isn't fully working yet.
+
+## Roadmap
+
+Planned features include:
+
+* **open an issue for whatever feature you want and I'll think about it... or do it yourself and tell me**
 
 ## License
 
 [MPL-2.0](LICENSE)
 
-## possible future features
--**ASCII sound and brightness bar show on panel toggle.**
--**custom color picker.** 
-
 ## Acknowledgments
 
-Built with [libcosmic](https://github.com/pop-os/libcosmic) and scaffolded from [cosmic-app-template](https://github.com/pop-os/cosmic-app-template).
+Built with [libcosmic](https://github.com/pop-os/libcosmic) and originally scaffolded from [cosmic-app-template](https://github.com/pop-os/cosmic-app-template).
+
+Special thanks to **KodeBarista** for their substantial help with development, troubleshooting, and getting ASCII Deck to where it is today.

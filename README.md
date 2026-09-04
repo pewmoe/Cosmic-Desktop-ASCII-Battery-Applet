@@ -5,7 +5,8 @@ A compact, customizable control applet for the [COSMIC](https://system76.com/cos
 ```text
 87% ⚡[█████████░]
 ```
-![Uploading Screenshot_2026-09-04_09-25-29.png…]()
+<img width="395" height="315" alt="Screenshot_2026-09-04_09-25-29" src="https://github.com/user-attachments/assets/6ef97fa7-c135-4a94-aae3-3201dcb43a9e" />
+
 
 ## Features
 

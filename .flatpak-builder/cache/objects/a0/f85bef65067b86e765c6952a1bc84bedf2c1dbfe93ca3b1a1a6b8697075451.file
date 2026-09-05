@@ -1,0 +1,27 @@
+[Application]
+name=com.github.pewmoe.cosmic-ext-ASCII-dot-battery
+runtime=org.freedesktop.Platform/x86_64/25.08
+sdk=org.freedesktop.Sdk/x86_64/25.08
+command=cosmic-ext-ascii-dot-battery
+
+[Context]
+shared=ipc;
+sockets=wayland;
+devices=dri;
+filesystems=xdg-data/fonts:ro;xdg-config/cosmic:ro;/usr/share/fonts:ro;/sys/class/backlight:ro;xdg-config/dconf:ro;/usr/share/cosmic:ro;
+
+[System Bus Policy]
+net.hadess.PowerProfiles=talk
+org.freedesktop.login1=talk
+org.freedesktop.UPower=talk
+
+[Environment]
+DCONF_PROFILE=cosmic
+
+[Extension com.github.pewmoe.cosmic_ext_ASCII_dot_battery.Debug]
+directory=lib/debug
+autodelete=true
+no-autodownload=true
+
+[Build]
+built-extensions=com.github.pewmoe.cosmic_ext_ASCII_dot_battery.Debug;

@@ -930,6 +930,7 @@ dependencies = [
 name = "cosmic-ext-ascii-dot-battery"
 version = "1.2.0"
 dependencies = [
+ "cosmic-config",
  "i18n-embed",
  "i18n-embed-fl",
  "libcosmic",

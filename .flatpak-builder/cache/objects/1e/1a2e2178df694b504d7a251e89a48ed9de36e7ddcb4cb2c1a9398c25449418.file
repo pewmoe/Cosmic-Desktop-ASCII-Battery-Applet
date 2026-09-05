@@ -1,0 +1,5 @@
+[Runtime]
+name=com.github.pewmoe.cosmic_ext_ASCII_dot_battery.Debug
+
+[ExtensionOf]
+ref=app/com.github.pewmoe.cosmic-ext-ASCII-dot-battery/x86_64/master

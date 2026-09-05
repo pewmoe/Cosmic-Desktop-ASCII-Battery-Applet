@@ -1,0 +1,4 @@
+[Application]
+name=com.github.pewmoe.cosmic-ext-ASCII-dot-battery
+runtime=org.freedesktop.Platform/x86_64/25.08
+sdk=org.freedesktop.Sdk/x86_64/25.08

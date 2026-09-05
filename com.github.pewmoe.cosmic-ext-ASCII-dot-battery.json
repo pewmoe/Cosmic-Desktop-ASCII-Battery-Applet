@@ -24,7 +24,7 @@
 	"build-options": {
   "append-path": "/usr/lib/sdk/rust-stable/bin",
   "env": {
-    "CARGO_BUILD_JOBS": "5",
+    "CARGO_BUILD_JOBS": "8",
     "CARGO_HOME": "/run/build/cosmic-ext-ascii-dot-battery/cargo",
     "LOCKSTEP_XML_PATH": "/run/build/cosmic-ext-ascii-dot-battery/vendor/atspi-common/xml"
   }

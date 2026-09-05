@@ -258,7 +258,7 @@ impl Application for BatteryApplet {
     type Message = Message;
 
     const APP_ID: &'static str =
-        "com.github.pewmoe.cosmic-ext-ASCII-deck";
+        "com.github.pewmoe.cosmic-ext-ASCII-dot-battery";
 
     fn core(&self) -> &Core {
         &self.core
@@ -1634,7 +1634,7 @@ fn get_config_path() -> PathBuf {
         );
 
     path.push(
-        "com.github.pewmoe.cosmic-ext-ASCII-deck",
+        "com.github.pewmoe.cosmic-ext-ASCII-dot-battery",
     );
 
     std::fs::create_dir_all(

@@ -1619,32 +1619,27 @@ impl BatteryApplet {
 fn get_config_path() -> PathBuf {
     let mut path =
         PathBuf::from(
-            std::env::var(
-                "XDG_CONFIG_HOME"
-            )
-            .unwrap_or_else(|_| {
-                format!(
-                    "{}/.config",
-                    std::env::var(
-                        "HOME"
+            std::env::var("XDG_CONFIG_HOME")
+                .unwrap_or_else(|_| {
+                    format!(
+                        "{}/.config",
+                        std::env::var("HOME")
+                            .unwrap_or_default()
                     )
-                    .unwrap_or_default()
-                )
-            }),
+                }),
         );
 
     path.push(
         "com.github.pewmoe.cosmic-ext-ASCII-dot-battery",
+    );
 
-    std::fs::create_dir_all(
-        &path
-    )
-    .ok();
+    std::fs::create_dir_all(&path).ok();
 
     path.push("config.json");
 
     path
 }
+
 
 fn load_config() -> AppletConfig {
     let path = get_config_path();

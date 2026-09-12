@@ -1941,7 +1941,6 @@ fn get_battery_info()
                 None,
                 None,
             ));
-
     Some(
         BatteryState {
             percentage,

@@ -40,7 +40,7 @@
           "type": "git",
           "url": "https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet",
           "branch": "update-v1.2.0",
-          "commit": "18eebc14bc51ba5d79d785636b5b5dbd8d3fcec1"
+          "commit": "9f2726bd1979b2a42c493a8ab98ca0926051eef5"
         },
         "cargo-sources.json"
       ]

@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-ext-ascii-dot-battery"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 license = "MPL-2.0"
 description = "Battery style applet for cosmic desktop"

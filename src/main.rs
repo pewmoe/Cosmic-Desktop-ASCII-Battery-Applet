@@ -15,7 +15,7 @@ use zbus::blocking::{Connection, Proxy};
 const ROWS: u32 = 5;
 const PCT_PER_ROW: u32 = 100 / ROWS;
 const BOLT_ROW_INDEX: u32 = ROWS / 2;
-const APP_VERSION: &str = "1.2.0";
+const APP_VERSION: &str = "1.3.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupTab {

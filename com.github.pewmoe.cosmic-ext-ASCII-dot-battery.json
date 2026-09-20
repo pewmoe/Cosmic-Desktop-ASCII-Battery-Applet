@@ -12,6 +12,7 @@
     "--filesystem=xdg-config/cosmic:rw",
     "--filesystem=/sys/class/power_supply:ro",
     "--filesystem=/sys/class/backlight:ro",
+    "--filesystem=/sys/class/leds:ro",
     "--talk-name=com.system76.CosmicSettingsDaemon",
     "--system-talk-name=net.hadess.PowerProfiles",
     "--system-talk-name=org.freedesktop.login1"

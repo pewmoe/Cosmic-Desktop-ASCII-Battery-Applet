@@ -69,9 +69,7 @@ A compact, customizable control applet for the [COSMIC](https://system76.com/cos
 
 ### Via the COSMIC Flatpak repository
 
-This applet is submitted to the COSMIC Flatpak repository and is pending review.
-
-Once available:
+This applet is submitted to the COSMIC Flatpak repository.
 
 ```bash
 flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo
@@ -113,7 +111,6 @@ just check           # Run checks / clippy
 ## Known Issues
 
 * The **notification applet disappearing** issue is related to the COSMIC notification applet rather than ASCII Deck. Logging out, rebooting, or restarting the relevant COSMIC components can restore it.
-* The **Dark mode** isn't fully working yet.
 
 ## Roadmap
 

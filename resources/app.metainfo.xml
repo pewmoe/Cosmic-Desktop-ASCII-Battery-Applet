@@ -41,6 +41,11 @@
     <keyword>COSMIC</keyword>
   </keywords>
   <releases>
+    <release version="1.3.0" date="2026-09-21">
+      <description>
+        <p>Added keyboard backlight controls: an ASCII brightness slider in the popup deck and an optional keyboard backlight panel module.</p>
+      </description>
+    </release>
     <release version="1.2.0" date="2026-08-29">
       <description>
         <p>Added interactive ASCII brightness/volume controls, panel order customization, scaling options, and manual accent color overrides.</p>

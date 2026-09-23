@@ -29,6 +29,7 @@ A compact, customizable control applet for the [COSMIC](https://system76.com/cos
     * Performance
   * ASCII brightness slider
   * Screen brightness control
+  * Keyboard backlight slider (shown when a backlit keyboard is present)
 
 * **ASCII battery visualization**
 
@@ -47,6 +48,7 @@ A compact, customizable control applet for the [COSMIC](https://system76.com/cos
 
   * Toggle battery display
   * Toggle brightness display
+  * Toggle keyboard backlight display
   * Change panel text size
   * Adjust ASCII block count
   * Adjust spacing

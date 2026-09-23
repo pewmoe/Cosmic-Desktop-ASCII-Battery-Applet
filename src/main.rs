@@ -15,7 +15,7 @@ use zbus::blocking::{Connection, Proxy};
 const ROWS: u32 = 5;
 const PCT_PER_ROW: u32 = 100 / ROWS;
 const BOLT_ROW_INDEX: u32 = ROWS / 2;
-const APP_VERSION: &str = "1.2.0";
+const APP_VERSION: &str = "1.3.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupTab {
@@ -35,6 +35,7 @@ pub enum DotSize {
 pub enum PanelModule {
     Battery,
     Brightness,
+    Keyboard,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -101,6 +102,7 @@ pub fn render_vertical_battery(percent: u32, charging: bool) -> String {
 pub struct AppletConfig {
     pub show_panel_battery: bool,
     pub show_panel_brightness: bool,
+    pub show_panel_keyboard: bool,
     pub panel_order: Vec<PanelModule>,
     pub show_dot_grid: bool,
     pub show_ascii_battery: bool,
@@ -118,9 +120,11 @@ impl Default for AppletConfig {
         Self {
             show_panel_battery: true,
             show_panel_brightness: false,
+            show_panel_keyboard: false,
             panel_order: vec![
                 PanelModule::Battery,
                 PanelModule::Brightness,
+                PanelModule::Keyboard,
             ],
             show_dot_grid: true,
             show_ascii_battery: true,
@@ -161,9 +165,12 @@ pub struct BatteryApplet {
 
     active_profile: String,
     brightness_percent: u32,
+    kbd_brightness_percent: u32,
+    has_kbd_backlight: bool,
 
     popup: Option<window::Id>,
     is_dragging_brightness: bool,
+    is_dragging_kbd_brightness: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +179,7 @@ pub enum Message {
     BatteryFetched(Option<BatteryState>),
     ProfileFetched(Option<String>),
     BrightnessFetched(Option<u32>),
+    KbdBrightnessFetched(Option<u32>),
     DarkModeFetched(Option<bool>),
 
     ToggleMenu,
@@ -183,9 +191,14 @@ pub enum Message {
     BrightnessDragOver(u32),
     BrightnessDragEnd,
 
+    KbdBrightnessPress(u32),
+    KbdBrightnessDragOver(u32),
+    KbdBrightnessDragEnd,
+
     SetAccentColor(Option<Color>),
     TogglePanelBattery(bool),
     TogglePanelBrightness(bool),
+    TogglePanelKeyboard(bool),
     MoveModuleLeft(usize),
     MoveModuleRight(usize),
 
@@ -245,9 +258,12 @@ impl Default for BatteryApplet {
 
             active_profile: String::from("balanced"),
             brightness_percent: 100,
+            kbd_brightness_percent: 100,
+            has_kbd_backlight: false,
 
             popup: None,
             is_dragging_brightness: false,
+            is_dragging_kbd_brightness: false,
         }
     }
 }
@@ -315,6 +331,18 @@ impl Application for BatteryApplet {
             }
 
             Message::BrightnessFetched(None) => {}
+
+            Message::KbdBrightnessFetched(Some(pct)) => {
+                self.has_kbd_backlight = true;
+
+                if !self.is_dragging_kbd_brightness {
+                    self.kbd_brightness_percent = pct;
+                }
+            }
+
+            Message::KbdBrightnessFetched(None) => {
+                self.has_kbd_backlight = false;
+            }
 
             Message::DarkModeFetched(Some(is_dark)) => {
                 self.dark_mode = is_dark;
@@ -439,6 +467,55 @@ impl Application for BatteryApplet {
                 );
             }
 
+            Message::KbdBrightnessPress(pct) => {
+                let pct = pct.min(100);
+
+                self.is_dragging_kbd_brightness = true;
+                self.kbd_brightness_percent = pct;
+
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_kbd_brightness_percent(pct)
+                        )
+                        .await
+                        .ok();
+                    },
+                    move |_| {
+                        cosmic::Action::App(
+                            Message::KbdBrightnessFetched(Some(pct))
+                        )
+                    },
+                );
+            }
+
+            Message::KbdBrightnessDragOver(pct) => {
+                if self.is_dragging_kbd_brightness {
+                    self.kbd_brightness_percent = pct.min(100);
+                }
+            }
+
+            Message::KbdBrightnessDragEnd => {
+                self.is_dragging_kbd_brightness = false;
+
+                let pct = self.kbd_brightness_percent;
+
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(
+                            move || set_kbd_brightness_percent(pct)
+                        )
+                        .await
+                        .ok();
+                    },
+                    move |_| {
+                        cosmic::Action::App(
+                            Message::KbdBrightnessFetched(Some(pct))
+                        )
+                    },
+                );
+            }
+
             Message::SetAccentColor(color) => {
                 self.config.accent_color_rgba =
                     color.map(|c| [c.r, c.g, c.b, c.a]);
@@ -453,6 +530,11 @@ impl Application for BatteryApplet {
 
             Message::TogglePanelBrightness(val) => {
                 self.config.show_panel_brightness = val;
+                save_needed = true;
+            }
+
+            Message::TogglePanelKeyboard(val) => {
+                self.config.show_panel_keyboard = val;
                 save_needed = true;
             }
 
@@ -668,6 +750,49 @@ impl Application for BatteryApplet {
                         .class(
                             cosmic::theme::Text::Color(
                                 bri_color
+                            )
+                        );
+
+                    panel_items = panel_items.push(txt);
+                }
+
+                PanelModule::Keyboard
+                    if self.config.show_panel_keyboard
+                        && self.has_kbd_backlight =>
+                {
+                    visible_count += 1;
+
+                    let pct =
+                        self.kbd_brightness_percent.min(100);
+
+                    let kbd_color =
+                        accent_color.unwrap_or_else(
+                            || get_tier_color(pct)
+                        );
+
+                    let filled_count =
+                        ((pct as f32 / 100.0)
+                            * blocks as f32)
+                            .round() as usize;
+
+                    let str_kbd = format!(
+                        "⌨{:>3}%[{}{}]",
+                        pct,
+                        "█".repeat(filled_count),
+                        "░".repeat(
+                            blocks.saturating_sub(filled_count)
+                        )
+                    );
+
+                    let txt = text(str_kbd)
+                        .font(cosmic::iced::Font::MONOSPACE)
+                        .size(self.config.panel_font_size)
+                        .wrapping(
+                            cosmic::iced::widget::text::Wrapping::None
+                        )
+                        .class(
+                            cosmic::theme::Text::Color(
+                                kbd_color
                             )
                         );
 
@@ -957,6 +1082,90 @@ impl BatteryApplet {
             .spacing(4);
 
         // -------------------------------------------------
+        // KEYBOARD BACKLIGHT — only shown when a
+        // `*kbd_backlight*` LED device exists.
+        // -------------------------------------------------
+
+        let kbd_brightness_block: Option<Element<'_, Message>> =
+            if self.has_kbd_backlight {
+                let kbd_color =
+                    accent_color.unwrap_or_else(
+                        || {
+                            get_tier_color(
+                                self.kbd_brightness_percent
+                            )
+                        }
+                    );
+
+                let mut kbd_slider_row =
+                    row![].spacing(2);
+
+                let filled_kbd_segments =
+                    ((self.kbd_brightness_percent as f32
+                        / 100.0)
+                        * 10.0)
+                        .round() as usize;
+
+                for i in 1..=10 {
+                    let glyph =
+                        if i <= filled_kbd_segments {
+                            "█"
+                        } else {
+                            "░"
+                        };
+
+                    let target_pct =
+                        (i * 10) as u32;
+
+                    let segment = mouse_area(
+                        text(glyph)
+                            .font(
+                                cosmic::iced::Font::MONOSPACE
+                            )
+                            .size(15)
+                            .class(
+                                cosmic::theme::Text::Color(
+                                    kbd_color
+                                )
+                            ),
+                    )
+                    .on_press(
+                        Message::KbdBrightnessPress(
+                            target_pct
+                        )
+                    )
+                    .on_enter(
+                        Message::KbdBrightnessDragOver(
+                            target_pct
+                        )
+                    )
+                    .on_release(
+                        Message::KbdBrightnessDragEnd
+                    );
+
+                    kbd_slider_row =
+                        kbd_slider_row.push(segment);
+                }
+
+                Some(
+                    column![
+                        self.styled_text(
+                            format!(
+                                "⌨ {}%",
+                                self.kbd_brightness_percent
+                            ),
+                            12
+                        ),
+                        kbd_slider_row
+                    ]
+                    .spacing(4)
+                    .into()
+                )
+            } else {
+                None
+            };
+
+        // -------------------------------------------------
         // DARK MODE — KEPT
         // -------------------------------------------------
 
@@ -996,9 +1205,16 @@ impl BatteryApplet {
                 stats_col,
                 profile_widget,
                 brightness_block,
-                theme_block,
             ]
             .spacing(12);
+
+        if let Some(kbd_block) =
+            kbd_brightness_block
+        {
+            left_col = left_col.push(kbd_block);
+        }
+
+        left_col = left_col.push(theme_block);
 
         // -------------------------------------------------
         // DOT GRID
@@ -1144,6 +1360,24 @@ impl BatteryApplet {
             )
             .padding(4);
 
+        let btn_tog_kbd =
+            button::custom(
+                text(
+                    if self.config.show_panel_keyboard {
+                        "[x] Keyboard"
+                    } else {
+                        "[ ] Keyboard"
+                    }
+                )
+                .size(11),
+            )
+            .on_press(
+                Message::TogglePanelKeyboard(
+                    !self.config.show_panel_keyboard
+                ),
+            )
+            .padding(4);
+
         let panel_toggles =
             column![
                 self.styled_text(
@@ -1152,7 +1386,8 @@ impl BatteryApplet {
                 ),
                 row![
                     btn_tog_bat,
-                    btn_tog_bri
+                    btn_tog_bri,
+                    btn_tog_kbd
                 ]
                 .spacing(6)
             ]
@@ -1324,6 +1559,8 @@ impl BatteryApplet {
                         "Battery",
                     PanelModule::Brightness =>
                         "Brightness",
+                    PanelModule::Keyboard =>
+                        "Keyboard",
                 };
 
             let btn_left =
@@ -1647,9 +1884,22 @@ fn load_config() -> AppletConfig {
     if let Ok(data) =
         std::fs::read_to_string(path)
     {
-        if let Ok(config) =
-            serde_json::from_str(&data)
+        if let Ok(mut config) =
+            serde_json::from_str::<AppletConfig>(&data)
         {
+            // Configs saved before a module existed won't list it in
+            // panel_order, which would keep it from ever rendering.
+            // Append any module that is missing.
+            for module in [
+                PanelModule::Battery,
+                PanelModule::Brightness,
+                PanelModule::Keyboard,
+            ] {
+                if !config.panel_order.contains(&module) {
+                    config.panel_order.push(module);
+                }
+            }
+
             return config;
         }
     }
@@ -1714,6 +1964,21 @@ fn fetch_all_states() -> Task<Message> {
             |res| {
                 cosmic::Action::App(
                     Message::BrightnessFetched(res)
+                )
+            },
+        ),
+
+        Task::perform(
+            async {
+                tokio::task::spawn_blocking(
+                    get_kbd_brightness_percent
+                )
+                .await
+                .unwrap_or(None)
+            },
+            |res| {
+                cosmic::Action::App(
+                    Message::KbdBrightnessFetched(res)
                 )
             },
         ),
@@ -2183,6 +2448,147 @@ fn set_brightness_percent(
         "SetBrightness",
         &(
             "backlight",
+            name.as_str(),
+            target
+        ),
+    )?;
+
+    Ok(())
+}
+
+// -----------------------------------------------------
+// KEYBOARD BACKLIGHT (LED subsystem)
+// -----------------------------------------------------
+
+fn kbd_backlight_device_name()
+    -> Option<String>
+{
+    std::fs::read_dir(
+        "/sys/class/leds"
+    )
+    .ok()?
+    .filter_map(|e| e.ok())
+    .map(
+        |e|
+            e.file_name()
+                .to_string_lossy()
+                .into_owned()
+    )
+    .find(
+        |name|
+            name.contains("kbd_backlight")
+    )
+}
+
+fn get_kbd_brightness_percent()
+    -> Option<u32>
+{
+    let name =
+        kbd_backlight_device_name()?;
+
+    let base =
+        format!(
+            "/sys/class/leds/{name}"
+        );
+
+    let current: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/brightness"
+            )
+        )
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+
+    let max: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/max_brightness"
+            )
+        )
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+
+    if max == 0 {
+        return None;
+    }
+
+    Some(
+        (
+            (current as f32
+                / max as f32)
+                * 100.0
+        )
+        .round() as u32
+    )
+}
+
+fn set_kbd_brightness_percent(
+    pct: u32,
+) -> zbus::Result<()> {
+    let name =
+        kbd_backlight_device_name()
+            .ok_or_else(
+                || {
+                    zbus::Error::Failure(
+                        "no keyboard backlight device found"
+                            .into()
+                    )
+                }
+            )?;
+
+    let base =
+        format!(
+            "/sys/class/leds/{name}"
+        );
+
+    let max: u32 =
+        std::fs::read_to_string(
+            format!(
+                "{base}/max_brightness"
+            )
+        )
+        .ok()
+        .and_then(
+            |s|
+                s.trim()
+                    .parse()
+                    .ok()
+        )
+        .unwrap_or(1);
+
+    let target =
+        (
+            (pct.min(100) as f32
+                / 100.0)
+                * max as f32
+        )
+        .round() as u32;
+
+    let connection =
+        Connection::system()?;
+
+    let session_path =
+        get_session_path(
+            &connection
+        )?;
+
+    let session =
+        Proxy::new(
+            &connection,
+            "org.freedesktop.login1",
+            session_path,
+            "org.freedesktop.login1.Session",
+        )?;
+
+    session.call::<_, _, ()>(
+        "SetBrightness",
+        &(
+            "leds",
             name.as_str(),
             target
         ),

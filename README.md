@@ -126,4 +126,4 @@ Planned features include:
 
 Built with [libcosmic](https://github.com/pop-os/libcosmic) and originally scaffolded from [cosmic-app-template](https://github.com/pop-os/cosmic-app-template).
 
-Special thanks to **KodeBarista** for their substantial help with development, troubleshooting, and getting ASCII Deck to where it is today.
+Special thanks to **KodeBarista** and **WhatYouGoBy**for their substantial help with development, troubleshooting, and getting ASCII Deck to where it is today.

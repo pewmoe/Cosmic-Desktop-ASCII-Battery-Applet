@@ -3,7 +3,7 @@
   <id>com.github.pewmoe.cosmic-ext-ASCII-dot-battery</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
-  <name>Power ASCII Deck</name>
+  <name>ASCII Deck</name>
   <summary>Ascii Battery style applet for cosmic desktop</summary>
   <description>
     <p>
@@ -41,6 +41,11 @@
     <keyword>COSMIC</keyword>
   </keywords>
   <releases>
+  <release version="1.4.0" date="2026-01-7">
+      <description>
+        <p>Updated the app for the 1.4.0 release. External HDMI/DisplayPort brightness remains an optional native-only feature for supported DDC/CI hardware; Flatpak builds intentionally hide it to stay within the sandbox.</p>
+      </description>
+    </release>
     <release version="1.3.0" date="2026-09-21">
       <description>
         <p>Added keyboard backlight controls: an ASCII brightness slider in the popup deck and an optional keyboard backlight panel module.</p>

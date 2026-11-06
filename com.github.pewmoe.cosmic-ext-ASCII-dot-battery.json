@@ -3,7 +3,11 @@
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "25.08",
   "sdk": "org.freedesktop.Sdk",
-  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
+  "base": "com.system76.Cosmic.BaseApp",
+  "base-version": "stable",
   "command": "cosmic-ext-ascii-dot-battery",
   "finish-args": [
     "--socket=wayland",
@@ -40,8 +44,8 @@
         {
           "type": "git",
           "url": "https://github.com/pewmoe/Cosmic-Desktop-ASCII-Battery-Applet",
-          "branch": "update-v1.2.0",
-          "commit": "9f2726bd1979b2a42c493a8ab98ca0926051eef5"
+          "tag": "v1.4.0",
+          "commit": "6f9989e4f70c25f1c572252f4b5302b231ca1013"
         },
         "cargo-sources.json"
       ]

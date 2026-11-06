@@ -11,11 +11,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
+use ddc::{Ddc, Edid};
+use ddc_i2c::{from_i2c_device, I2cDeviceDdc};
 
 const ROWS: u32 = 5;
 const PCT_PER_ROW: u32 = 100 / ROWS;
 const BOLT_ROW_INDEX: u32 = ROWS / 2;
-const APP_VERSION: &str = "1.3.0";
+const APP_VERSION: &str = "1.4.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PopupTab {
@@ -36,6 +38,7 @@ pub enum PanelModule {
     Battery,
     Brightness,
     Keyboard,
+    External,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,6 +106,7 @@ pub struct AppletConfig {
     pub show_panel_battery: bool,
     pub show_panel_brightness: bool,
     pub show_panel_keyboard: bool,
+    pub show_panel_external: bool,
     pub panel_order: Vec<PanelModule>,
     pub show_dot_grid: bool,
     pub show_ascii_battery: bool,
@@ -121,10 +125,12 @@ impl Default for AppletConfig {
             show_panel_battery: true,
             show_panel_brightness: false,
             show_panel_keyboard: false,
+            show_panel_external: false,
             panel_order: vec![
                 PanelModule::Battery,
                 PanelModule::Brightness,
                 PanelModule::Keyboard,
+                PanelModule::External,
             ],
             show_dot_grid: true,
             show_ascii_battery: true,
@@ -137,6 +143,14 @@ impl Default for AppletConfig {
             panel_spacing: 8,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalMonitor {
+    pub id: String,
+    pub name: String,
+    pub percent: u32,
+    pub max: u16,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -171,6 +185,10 @@ pub struct BatteryApplet {
     popup: Option<window::Id>,
     is_dragging_brightness: bool,
     is_dragging_kbd_brightness: bool,
+
+    external_monitors: Vec<ExternalMonitor>,
+    dragging_ext: Option<usize>,
+    tick_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -195,10 +213,17 @@ pub enum Message {
     KbdBrightnessDragOver(u32),
     KbdBrightnessDragEnd,
 
+    ExternalMonitorsFetched(Vec<ExternalMonitor>),
+    ExtBrightnessPress(usize, u32),
+    ExtBrightnessDragOver(usize, u32),
+    ExtBrightnessDragEnd(usize),
+    Noop,
+
     SetAccentColor(Option<Color>),
     TogglePanelBattery(bool),
     TogglePanelBrightness(bool),
     TogglePanelKeyboard(bool),
+    TogglePanelExternal(bool),
     MoveModuleLeft(usize),
     MoveModuleRight(usize),
 
@@ -264,6 +289,10 @@ impl Default for BatteryApplet {
             popup: None,
             is_dragging_brightness: false,
             is_dragging_kbd_brightness: false,
+
+            external_monitors: Vec::new(),
+            dragging_ext: None,
+            tick_count: 0,
         }
     }
 }
@@ -293,7 +322,17 @@ impl Application for BatteryApplet {
             ..Default::default()
         };
 
-        (applet, fetch_all_states())
+        (
+            applet,
+            Task::batch(vec![
+                fetch_all_states(),
+                if running_in_flatpak() {
+                    Task::none()
+                } else {
+                    fetch_external_monitors()
+                },
+            ]),
+        )
     }
 
     fn update(
@@ -304,6 +343,19 @@ impl Application for BatteryApplet {
 
         match message {
             Message::Tick => {
+                self.tick_count = self.tick_count.wrapping_add(1);
+
+                if !running_in_flatpak()
+                    && self.config.show_panel_external
+                    && self.dragging_ext.is_none()
+                    && self.tick_count % 10 == 0
+                {
+                    return Task::batch(vec![
+                        fetch_all_states(),
+                        fetch_external_monitors(),
+                    ]);
+                }
+
                 return fetch_all_states();
             }
 
@@ -350,6 +402,49 @@ impl Application for BatteryApplet {
 
             Message::DarkModeFetched(None) => {}
 
+            Message::ExternalMonitorsFetched(mons) => {
+                if self.dragging_ext.is_none() {
+                    self.external_monitors = mons;
+                }
+            }
+
+            Message::ExtBrightnessPress(idx, pct) => {
+                let pct = pct.min(100);
+
+                let (id, max) = match self.external_monitors.get_mut(idx) {
+                    Some(m) => {
+                        m.percent = pct;
+                        (m.id.clone(), m.max)
+                    }
+                    None => return Task::none(),
+                };
+
+                self.dragging_ext = Some(idx);
+                return set_external_task(id, max, pct);
+            }
+
+            Message::ExtBrightnessDragOver(idx, pct) => {
+                if self.dragging_ext == Some(idx) {
+                    if let Some(m) = self.external_monitors.get_mut(idx) {
+                        m.percent = pct.min(100);
+                    }
+                }
+            }
+
+            Message::ExtBrightnessDragEnd(idx) => {
+                self.dragging_ext = None;
+
+                if let Some(m) = self.external_monitors.get(idx) {
+                    return set_external_task(
+                        m.id.clone(),
+                        m.max,
+                        m.percent,
+                    );
+                }
+            }
+
+            Message::Noop => {}
+
             Message::ToggleMenu => {
                 if let Some(popup_id) = self.popup.take() {
                     return cosmic::iced::platform_specific::shell::commands::popup::
@@ -372,9 +467,17 @@ impl Application for BatteryApplet {
                     None,
                 );
 
-                return cosmic::iced::platform_specific::shell::commands::popup::
-                    get_popup::<Message>(popup_settings)
-                    .map(cosmic::Action::from);
+                let mut tasks = vec![
+                    cosmic::iced::platform_specific::shell::commands::popup::
+                        get_popup::<Message>(popup_settings)
+                        .map(cosmic::Action::from),
+                ];
+
+                if !running_in_flatpak() {
+                    tasks.push(fetch_external_monitors());
+                }
+
+                return Task::batch(tasks);
             }
 
             Message::SwitchTab(tab) => {
@@ -535,6 +638,11 @@ impl Application for BatteryApplet {
 
             Message::TogglePanelKeyboard(val) => {
                 self.config.show_panel_keyboard = val;
+                save_needed = true;
+            }
+
+            Message::TogglePanelExternal(val) => {
+                self.config.show_panel_external = val;
                 save_needed = true;
             }
 
@@ -797,6 +905,50 @@ impl Application for BatteryApplet {
                         );
 
                     panel_items = panel_items.push(txt);
+                }
+
+                PanelModule::External
+                    if !running_in_flatpak()
+                        && self.config.show_panel_external =>
+                {
+                    for mon in &self.external_monitors {
+                        visible_count += 1;
+
+                        let pct = mon.percent.min(100);
+
+                        let ext_color =
+                            accent_color.unwrap_or_else(
+                                || get_tier_color(pct)
+                            );
+
+                        let filled_count =
+                            ((pct as f32 / 100.0)
+                                * blocks as f32)
+                                .round() as usize;
+
+                        let str_ext = format!(
+                            "EXT{:>3}%[{}{}]",
+                            pct,
+                            "█".repeat(filled_count),
+                            "░".repeat(
+                                blocks.saturating_sub(filled_count)
+                            )
+                        );
+
+                        let txt = text(str_ext)
+                            .font(cosmic::iced::Font::MONOSPACE)
+                            .size(self.config.panel_font_size)
+                            .wrapping(
+                                cosmic::iced::widget::text::Wrapping::None
+                            )
+                            .class(
+                                cosmic::theme::Text::Color(
+                                    ext_color
+                                )
+                            );
+
+                        panel_items = panel_items.push(txt);
+                    }
                 }
 
                 _ => {}
@@ -1214,6 +1366,46 @@ impl BatteryApplet {
             left_col = left_col.push(kbd_block);
         }
 
+        if !running_in_flatpak() {
+            for (idx, mon) in self.external_monitors.iter().enumerate() {
+                let color = accent_color
+                    .unwrap_or_else(|| get_tier_color(mon.percent));
+
+                let filled =
+                    ((mon.percent as f32 / 100.0) * 10.0).round() as usize;
+
+                let mut slider = row![].spacing(2);
+
+                for i in 1..=10 {
+                    let glyph = if i <= filled { "█" } else { "░" };
+                    let target = (i * 10) as u32;
+
+                    let seg = mouse_area(
+                        text(glyph)
+                            .font(cosmic::iced::Font::MONOSPACE)
+                            .size(15)
+                            .class(cosmic::theme::Text::Color(color)),
+                    )
+                    .on_press(Message::ExtBrightnessPress(idx, target))
+                    .on_enter(Message::ExtBrightnessDragOver(idx, target))
+                    .on_release(Message::ExtBrightnessDragEnd(idx));
+
+                    slider = slider.push(seg);
+                }
+
+                left_col = left_col.push(
+                    column![
+                        self.styled_text(
+                            format!("{} {}%", mon.name, mon.percent),
+                            12
+                        ),
+                        slider
+                    ]
+                    .spacing(4),
+                );
+            }
+        }
+
         left_col = left_col.push(theme_block);
 
         // -------------------------------------------------
@@ -1378,7 +1570,25 @@ impl BatteryApplet {
             )
             .padding(4);
 
-        let panel_toggles =
+        let panel_toggles = if !running_in_flatpak() {
+            let btn_tog_ext =
+                button::custom(
+                    text(
+                        if self.config.show_panel_external {
+                            "[x] External"
+                        } else {
+                            "[ ] External"
+                        }
+                    )
+                    .size(11),
+                )
+                .on_press(
+                    Message::TogglePanelExternal(
+                        !self.config.show_panel_external
+                    ),
+                )
+                .padding(4);
+
             column![
                 self.styled_text(
                     "Panel".to_string(),
@@ -1387,11 +1597,27 @@ impl BatteryApplet {
                 row![
                     btn_tog_bat,
                     btn_tog_bri,
-                    btn_tog_kbd
+                    btn_tog_kbd,
+                    btn_tog_ext
                 ]
                 .spacing(6)
             ]
-            .spacing(4);
+            .spacing(4)
+        } else {
+            column![
+                self.styled_text(
+                    "Panel".to_string(),
+                    12
+                ),
+                row![
+                    btn_tog_bat,
+                    btn_tog_bri,
+                    btn_tog_kbd,
+                ]
+                .spacing(6)
+            ]
+            .spacing(4)
+        };
 
         // -------------------------------------------------
         // DOT GRID TOGGLE — PROPER COSMIC TOGGLE
@@ -1561,6 +1787,8 @@ impl BatteryApplet {
                         "Brightness",
                     PanelModule::Keyboard =>
                         "Keyboard",
+                    PanelModule::External =>
+                        "External",
                 };
 
             let btn_left =
@@ -1894,6 +2122,7 @@ fn load_config() -> AppletConfig {
                 PanelModule::Battery,
                 PanelModule::Brightness,
                 PanelModule::Keyboard,
+                PanelModule::External,
             ] {
                 if !config.panel_order.contains(&module) {
                     config.panel_order.push(module);
@@ -2598,6 +2827,169 @@ fn set_kbd_brightness_percent(
 }
 
 // -----------------------------------------------------
+// EXTERNAL MONITORS (DDC/CI)
+// -----------------------------------------------------
+
+fn fetch_external_monitors() -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(get_external_monitors)
+                .await
+                .unwrap_or_default()
+        },
+        |res| cosmic::Action::App(Message::ExternalMonitorsFetched(res)),
+    )
+}
+
+fn set_external_task(id: String, max: u16, pct: u32) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                set_external_brightness_percent(&id, max, pct)
+            })
+            .await
+            .ok();
+        },
+        |_| cosmic::Action::App(Message::Noop),
+    )
+}
+
+fn running_in_flatpak() -> bool {
+    std::env::var_os("FLATPAK_ID").is_some()
+        || std::path::Path::new("/.flatpak-info").exists()
+}
+
+// I2C adapters that never carry a monitor. List taken from ddcutil.
+const IGNORED_I2C_PREFIXES: [&str; 5] =
+    ["SMBus", "soc:i2cdsi", "smu", "mac-io", "u4"];
+
+/// Returns `/dev/i2c-N` paths for every I2C bus that could carry a display.
+fn i2c_bus_paths() -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir("/sys/class/i2c-dev") else {
+        return Vec::new();
+    };
+
+    let mut buses: Vec<u32> = Vec::new();
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+
+        let Some(n) = file_name
+            .strip_prefix("i2c-")
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+
+        let adapter_name =
+            std::fs::read_to_string(entry.path().join("name"))
+                .unwrap_or_default();
+
+        if IGNORED_I2C_PREFIXES
+            .iter()
+            .any(|p| adapter_name.starts_with(p))
+        {
+            continue;
+        }
+
+        buses.push(n);
+    }
+
+    buses.sort_unstable();
+
+    buses
+        .into_iter()
+        .map(|n| format!("/dev/i2c-{n}"))
+        .collect()
+}
+
+/// Reads the monitor name (descriptor tag 0xFC) out of a 128-byte EDID block.
+fn edid_model_name(edid: &[u8; 0x80]) -> Option<String> {
+    for off in [54usize, 72, 90, 108] {
+        let d = &edid[off..off + 18];
+
+        if d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0xFC {
+            let raw = String::from_utf8_lossy(&d[5..18]);
+            let name = raw.split('\n').next().unwrap_or("").trim();
+
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn open_ddc(path: &str) -> Option<I2cDeviceDdc> {
+    from_i2c_device(path).ok()
+}
+
+fn get_external_monitors() -> Vec<ExternalMonitor> {
+    if running_in_flatpak() {
+        // DDC/CI requires direct access to /dev/i2c-* devices. Flatpak usually
+        // forbids that unless the sandbox is explicitly granted, so avoid a
+        // broken external-monitor control path instead of advertising a
+        // nonfunctional slider.
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+
+    for path in i2c_bus_paths() {
+        let Some(mut ddc) = open_ddc(&path) else {
+            continue;
+        };
+
+        let mut edid = [0u8; 0x80];
+        if ddc.read_edid(0, &mut edid).is_err() {
+            continue;
+        }
+
+        // Panels without DDC/CI support (most laptop screens) fail here
+        // and are skipped.
+        let Ok(v) = ddc.get_vcp_feature(0x10) else {
+            continue;
+        };
+
+        let max = v.maximum();
+        if max == 0 {
+            continue;
+        }
+
+        let name = edid_model_name(&edid)
+            .unwrap_or_else(|| format!("Monitor ({path})"));
+
+        out.push(ExternalMonitor {
+            id: path,
+            name,
+            percent: ((v.value() as f32 / max as f32) * 100.0).round()
+                as u32,
+            max,
+        });
+    }
+
+    out
+}
+
+fn set_external_brightness_percent(
+    id: &str,
+    max: u16,
+    pct: u32,
+) -> Option<()> {
+    if running_in_flatpak() {
+        return None;
+    }
+
+    let target =
+        ((pct.min(100) as f32 / 100.0) * max as f32).round() as u16;
+
+    // `id` is the /dev/i2c-N path, so there is no need to re-enumerate.
+    let mut ddc = open_ddc(id)?;
+    ddc.set_vcp_feature(0x10, target).ok()
+}
+
+// -----------------------------------------------------
 // COSMIC SYSTEM DARK MODE
 // -----------------------------------------------------
 
@@ -2636,6 +3028,6 @@ fn main()
 {
     cosmic::applet::run::<BatteryApplet>(())
 }
-// the dark mode is kinda finicky. idk why havent thought about it much
-//anyways thanks for reading the cod
+//external monitor brightness control is a bit of a hack, and it may not work on all monitors. It also requires direct access to /dev/i2c-* devices, which Flatpak usually forbids unless the sandbox is explicitly granted. If you are running this applet in Flatpak, the external monitor brightness control will be disabled.
+// AND FOR THE IDIOTS SAYING THIS IS AI GFYS i used copilot only for the release process cauze idc to do it myself also, this is fully tested and works fine on my system, and i have no reason to believe it would break on other systems. if you have issues, please open an issue on the github repo :)
 //anyways thanks for reading the code
